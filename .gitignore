@@ -1,0 +1,6 @@
+.DS_Store
+*~
+build/
+.vscode/
+vcpkg_installed/
+src/resources/mitsuba2

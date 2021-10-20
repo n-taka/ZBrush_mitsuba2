@@ -1,0 +1,10 @@
+{
+    "name": "doppelganger",
+    "version-string": "2021.08",
+    "description": "HTML5 GUI for geometry processing with C++ backend",
+    "homepage": "https://github.com/n-taka/Doppelganger",
+    "dependencies": [
+        "nlohmann-json",
+        "eigen3"
+    ]
+}

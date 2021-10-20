@@ -1,0 +1,6 @@
+[submodule "submodule/vcpkg"]
+	path = submodule/vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+[submodule "submodule/tinyexr"]
+	path = submodule/tinyexr
+	url = https://github.com/syoyo/tinyexr.git
