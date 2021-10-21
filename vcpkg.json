@@ -1,8 +1,8 @@
 {
-    "name": "doppelganger",
-    "version-string": "2021.08",
-    "description": "HTML5 GUI for geometry processing with C++ backend",
-    "homepage": "https://github.com/n-taka/Doppelganger",
+    "name": "zbrush-mitsuba2",
+    "version-string": "2021.10",
+    "description": "ZBrush plugin for rendering with mitsuba2",
+    "homepage": "https://github.com/n-taka/ZBrush_mitsuba2",
     "dependencies": [
         "nlohmann-json",
         "eigen3"
