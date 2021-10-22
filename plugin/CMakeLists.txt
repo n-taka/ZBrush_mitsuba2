@@ -33,7 +33,11 @@ find_package(nlohmann_json CONFIG REQUIRED)
 
 ###
 # eigen3
-find_package(Eigen3 3.3 REQUIRED)
+find_package(Eigen3 CONFIG REQUIRED)
+
+###
+# libigl
+find_package(libigl CONFIG REQUIRED)
 
 # Add external libraries
 target_link_libraries(
@@ -42,6 +46,8 @@ target_link_libraries(
     nlohmann_json
     nlohmann_json::nlohmann_json
     Eigen3::Eigen
+    igl::core
+    igl::common
 )
 ###########################
 ##### Libraries (end) #####

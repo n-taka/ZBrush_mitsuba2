@@ -5,6 +5,7 @@
     "homepage": "https://github.com/n-taka/ZBrush_mitsuba2",
     "dependencies": [
         "nlohmann-json",
-        "eigen3"
+        "eigen3",
+        "libigl"
     ]
 }

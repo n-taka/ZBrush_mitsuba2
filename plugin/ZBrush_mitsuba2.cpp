@@ -10,6 +10,8 @@
 #include <sstream>
 #include <fstream>
 
+#include "igl/read_triangle_mesh.h"
+
 // debug
 #include <iostream>
 // debug
@@ -52,19 +54,27 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	// parameters = {
 	// 	"root": "path/to/root/directory/of/this/plugin",
 	// 	"format": "jpg"|"jpeg"|"png"|"bmp"|"tga",
-	// 	"sensor": { # we always use thinlens
-	//   "aperture_radius": size_of_aperture_radius,
-	//   "focus_distance": distance_to_focal_plane,
-	//   "near_clip": distance_to_clipping_near,
-	//   "far_clip": distance_to_clipping_far,
-	//   "sampler": {
-	//    "type": "independent"|"stratified"|"multijitter"|"orthogonal"|"ldsampler",
-	//    "sample_count": number_of_samples_per_pixel,
-	//   },
-	//   "film": { # we always use hdr (rgbe) format for rendering
-	//    "width": number_of_pixels_for_width,
-	//    "height": number_of_pixels_for_height,
-	//    "rfilter": "box"|"tent"|"gaussian"|"mitchell"|"catmullrom"|"lanczos"
+	// 	"mitsuba": {
+	// 	 "variant": "variant_for_rendering",
+	// 	 "sensor": { # we always use thinlens
+	//    "aperture_radius": size_of_aperture_radius,
+	//    "focal_length": "focal_length",
+	//    "fov": fov_value,
+	//    "focus_distance": distance_to_focal_plane,
+	//    "near_clip": distance_to_clipping_near,
+	//    "far_clip": distance_to_clipping_far,
+	//    "sampler": {
+	//     "type": "independent"|"stratified"|"multijitter"|"orthogonal"|"ldsampler",
+	//     "sample_count": number_of_samples_per_pixel,
+	//    },
+	//    "film": { # we always use exr format (default format for mitsuba) for rendering
+	//     "width": number_of_pixels_for_width,
+	//     "height": number_of_pixels_for_height,
+	//     "rfilter": "box"|"tent"|"gaussian"|"mitchell"|"catmullrom"|"lanczos"
+	//    },
+	//    "emitters": {
+	//     "constant": radiance_value_of_constant_emitter
+	//    }
 	//   }
 	//  }
 	//  TODO!!!!
@@ -79,6 +89,78 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	const nlohmann::json json = nlohmann::json::parse(jsonString);
 	const std::string &rootString = json.at("root").get<std::string>();
 	const fs::path rootPath(rootString);
+
+	std::cout << json.dump(4) << std::endl;
+
+	////
+	// calculate rotation of the mesh
+	//   Here we load GoZ file format (because such data contains complete information)
+	//   Then we export rotated mesh in ply format
+	{
+		const std::string &meshFileRelPathStr = json.at("meshFile").get<std::string>();
+		fs::path meshFileRelPath(meshFileRelPathStr);
+		fs::path meshFilePath(rootPath);
+		meshFilePath /= meshFileRelPath;
+
+		// todo replace with GoZ
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> V;
+		Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic> F;
+		igl::read_triangle_mesh(meshFilePath.string(), V, F);
+
+		// scale
+		//   In our setting, we scale so that its minimum bounding sphere has radius of 50.
+		//   * We use sphere so that sphere is rotational symmetry
+		{
+			Eigen::Matrix<double, 3, Eigen::Dynamic> XP;
+			Eigen::Matrix<double, 1, Eigen::Dynamic> center;
+			XP.resize(3, V.cols());
+			center.resize(1, V.cols());
+			double radius = 0;
+
+			const auto updateSphereFromXP = [&XP, &center, &radius]()
+			{
+				const double a = (XP.row(2) - XP.row(1)).norm();
+				const double b = (XP.row(0) - XP.row(2)).norm();
+				const double c = (XP.row(1) - XP.row(0)).norm();
+				const double cosA = (XP.row(1) - XP.row(0)).dot(XP.row(2) - XP.row(0)) / (b * c);
+				const double cosB = (XP.row(0) - XP.row(1)).dot(XP.row(2) - XP.row(1)) / (c * a);
+				const double cosC = (XP.row(0) - XP.row(2)).dot(XP.row(1) - XP.row(2)) / (a * b);
+				center = (a * cosA * XP.row(0) + b * cosB * XP.row(1) + c * cosC * XP.row(2)) / (a * cosA + b * cosB + c * cosC);
+				radius = (center - XP.row(0)).norm();
+			};
+			// initialize pick first 3 points to form a minimum bounding sphere
+			XP.row(0) = V.row(0);
+			XP.row(1) = V.row(1);
+			XP.row(2) = V.row(2);
+			updateSphereFromXP();
+			for (int v = 3; v < V.rows(); ++v)
+			{
+				const double distToCenter = (V.row(v) - center).norm();
+				if (distToCenter > radius)
+				{
+					// remove closest vertex
+					double distToClosest = std::numeric_limits<double>::max();
+					int closestXPIdx = -1;
+					for (int xp = 0; xp < XP.rows(); ++xp)
+					{
+						const double distToNewVert = (XP.row(xp) - V.row(v)).norm();
+						if (distToNewVert < distToClosest)
+						{
+							distToClosest = distToNewVert;
+							closestXPIdx = xp;
+						}
+					}
+					if (closestXPIdx > -1)
+					{
+						// update XP
+						XP.row(closestXPIdx) = V.row(v);
+						// update center/radius
+						updateSphereFromXP();
+					}
+				}
+			}
+		}
+	}
 
 	////
 	// setup xml
@@ -100,34 +182,294 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 		{
 			// scene
 			xml_node<> *scene = doc.allocate_node(node_element, "scene");
-			doc.append_node(scene);
 			xml_attribute<> *sceneAttr = doc.allocate_attribute("version", "2.0.0");
 			scene->append_attribute(sceneAttr);
 			{
 				// integrator
+				//   currently, we only support path tracer
 				xml_node<> *integrator = doc.allocate_node(node_element, "integrator");
-				scene->append_node(integrator);
 				xml_attribute<> *integratorAttr = doc.allocate_attribute("type", "path");
 				integrator->append_attribute(integratorAttr);
+				scene->append_node(integrator);
 			}
 			{
 				// sensor
+				const nlohmann::json &sensorJson = json.at("mitsuba").at("sensor");
+
 				xml_node<> *sensor = doc.allocate_node(node_element, "sensor");
-				scene->append_node(sensor);
-				xml_attribute<> *sensorAttr = doc.allocate_attribute("type", "perspective");
+				xml_attribute<> *sensorAttr = doc.allocate_attribute("type", "thinlens");
 				sensor->append_attribute(sensorAttr);
 				{
-					// TODO!!
+					// transform
+					xml_node<> *transform = doc.allocate_node(node_element, "transform");
+					xml_attribute<> *transformAttr = doc.allocate_attribute("name", "to_world");
+					transform->append_attribute(transformAttr);
+					{
+						// todo
+						// mitsuba2 is Y-up coordinate
+						xml_node<> *lookat = doc.allocate_node(node_element, "lookat");
+						xml_attribute<> *targetAttr = doc.allocate_attribute("target", "0.0, 0.0, 0.0");
+						lookat->append_attribute(targetAttr);
+						xml_attribute<> *originAttr = doc.allocate_attribute("origin", "0.0, 0.0, 100.0");
+						lookat->append_attribute(originAttr);
+						xml_attribute<> *upAttr = doc.allocate_attribute("up", "0.0, 1.0, 0.0");
+						lookat->append_attribute(upAttr);
+						transform->append_node(lookat);
+					}
+					sensor->append_node(transform);
 				}
+				{
+					// aperture_radius
+					xml_node<> *aperture_radius = doc.allocate_node(node_element, "float");
+					xml_attribute<> *aperture_radius_nameAttr = doc.allocate_attribute("name", "aperture_radius");
+					aperture_radius->append_attribute(aperture_radius_nameAttr);
+					char buf[255];
+					snprintf(buf, 255, "%f", sensorJson.at("aperture_radius").get<float>());
+					char *aperture_radius_value = doc.allocate_string(buf);
+					xml_attribute<> *aperture_radius_valueAttr = doc.allocate_attribute("value", aperture_radius_value);
+					aperture_radius->append_attribute(aperture_radius_valueAttr);
+					sensor->append_node(aperture_radius);
+				}
+				{
+					// focus_distance
+					// todo: convert parameter to actual length
+					xml_node<> *focus_distance = doc.allocate_node(node_element, "float");
+					xml_attribute<> *focus_distance_nameAttr = doc.allocate_attribute("name", "focus_distance");
+					focus_distance->append_attribute(focus_distance_nameAttr);
+					char buf[255];
+					snprintf(buf, 255, "%f", sensorJson.at("focus_distance").get<float>());
+					char *focus_distance_value = doc.allocate_string(buf);
+					xml_attribute<> *focus_distance_valueAttr = doc.allocate_attribute("value", focus_distance_value);
+					focus_distance->append_attribute(focus_distance_valueAttr);
+					sensor->append_node(focus_distance);
+				}
+				if (sensorJson.contains("focal_length"))
+				{
+					// focal_length
+					xml_node<> *focal_length = doc.allocate_node(node_element, "string");
+					xml_attribute<> *focal_length_nameAttr = doc.allocate_attribute("name", "focal_length");
+					focal_length->append_attribute(focal_length_nameAttr);
+					char *value = doc.allocate_string(sensorJson.at("focal_length").get<std::string>().c_str());
+					xml_attribute<> *focal_length_valueAttr = doc.allocate_attribute("value", value);
+					focal_length->append_attribute(focal_length_valueAttr);
+					sensor->append_node(focal_length);
+				}
+				else if (sensorJson.contains("fov"))
+				{
+					// fov
+					xml_node<> *fov = doc.allocate_node(node_element, "float");
+					xml_attribute<> *fov_nameAttr = doc.allocate_attribute("name", "fov");
+					fov->append_attribute(fov_nameAttr);
+					char buf[255];
+					snprintf(buf, 255, "%f", sensorJson.at("fov").get<float>());
+					char *fov_value = doc.allocate_string(buf);
+					xml_attribute<> *fov_valueAttr = doc.allocate_attribute("value", fov_value);
+					fov->append_attribute(fov_valueAttr);
+					sensor->append_node(fov);
+				}
+				{
+					// fov_axis
+					xml_node<> *fov_axis = doc.allocate_node(node_element, "string");
+					xml_attribute<> *fov_axis_nameAttr = doc.allocate_attribute("name", "fov_axis");
+					fov_axis->append_attribute(fov_axis_nameAttr);
+					// fov_axis: x is default value, but we explicitly set to "x" (possibly, this could be updated later...)
+					xml_attribute<> *fov_axis_valueAttr = doc.allocate_attribute("value", "x");
+					fov_axis->append_attribute(fov_axis_valueAttr);
+					sensor->append_node(fov_axis);
+				}
+				{
+					// near_clip
+					xml_node<> *near_clip = doc.allocate_node(node_element, "float");
+					xml_attribute<> *near_clip_nameAttr = doc.allocate_attribute("name", "near_clip");
+					near_clip->append_attribute(near_clip_nameAttr);
+					char buf[255];
+					snprintf(buf, 255, "%f", sensorJson.at("near_clip").get<float>());
+					char *near_clip_value = doc.allocate_string(buf);
+					xml_attribute<> *near_clip_valueAttr = doc.allocate_attribute("value", near_clip_value);
+					near_clip->append_attribute(near_clip_valueAttr);
+					sensor->append_node(near_clip);
+				}
+				{
+					// far_clip
+					xml_node<> *far_clip = doc.allocate_node(node_element, "float");
+					xml_attribute<> *far_clip_nameAttr = doc.allocate_attribute("name", "far_clip");
+					far_clip->append_attribute(far_clip_nameAttr);
+					char buf[255];
+					snprintf(buf, 255, "%f", sensorJson.at("far_clip").get<float>());
+					char *far_clip_value = doc.allocate_string(buf);
+					xml_attribute<> *far_clip_valueAttr = doc.allocate_attribute("value", far_clip_value);
+					far_clip->append_attribute(far_clip_valueAttr);
+					sensor->append_node(far_clip);
+				}
+
+				{
+					// sampler
+					const nlohmann::json &samplerJson = sensorJson.at("sampler");
+					xml_node<> *sampler = doc.allocate_node(node_element, "sampler");
+					char *type_value = doc.allocate_string(samplerJson.at("type").get<std::string>().c_str());
+					xml_attribute<> *samplerAttr = doc.allocate_attribute("type", type_value);
+					sampler->append_attribute(samplerAttr);
+					{
+						xml_node<> *sample_count = doc.allocate_node(node_element, "integer");
+						{
+							xml_attribute<> *sample_countAttr = doc.allocate_attribute("name", "sample_count");
+							sample_count->append_attribute(sample_countAttr);
+						}
+						{
+							char buf[255];
+							snprintf(buf, 255, "%d", samplerJson.at("sample_count").get<int>());
+							char *sample_count_value = doc.allocate_string(buf);
+							xml_attribute<> *sample_countAttr = doc.allocate_attribute("value", sample_count_value);
+							sample_count->append_attribute(sample_countAttr);
+						}
+						sampler->append_node(sample_count);
+					}
+					sensor->append_node(sampler);
+				}
+				{
+					// film
+					const nlohmann::json &filmJson = sensorJson.at("film");
+					xml_node<> *film = doc.allocate_node(node_element, "film");
+					xml_attribute<> *filmAttr = doc.allocate_attribute("type", "hdrfilm");
+					film->append_attribute(filmAttr);
+					{
+						xml_node<> *width = doc.allocate_node(node_element, "integer");
+						{
+							xml_attribute<> *widthAttr = doc.allocate_attribute("name", "width");
+							width->append_attribute(widthAttr);
+						}
+						{
+							char buf[255];
+							snprintf(buf, 255, "%d", filmJson.at("width").get<int>());
+							char *width_value = doc.allocate_string(buf);
+							xml_attribute<> *widthAttr = doc.allocate_attribute("value", width_value);
+							width->append_attribute(widthAttr);
+						}
+						film->append_node(width);
+					}
+					{
+						xml_node<> *height = doc.allocate_node(node_element, "integer");
+						{
+							xml_attribute<> *heightAttr = doc.allocate_attribute("name", "height");
+							height->append_attribute(heightAttr);
+						}
+						{
+							char buf[255];
+							snprintf(buf, 255, "%d", filmJson.at("height").get<int>());
+							char *height_value = doc.allocate_string(buf);
+							xml_attribute<> *heightAttr = doc.allocate_attribute("value", height_value);
+							height->append_attribute(heightAttr);
+						}
+						film->append_node(height);
+					}
+					{
+						xml_node<> *rfilter = doc.allocate_node(node_element, "rfilter");
+						char *type_value = doc.allocate_string(filmJson.at("rfilter").get<std::string>().c_str());
+						xml_attribute<> *rfilterAttr = doc.allocate_attribute("type", type_value);
+						rfilter->append_attribute(rfilterAttr);
+						film->append_node(rfilter);
+					}
+					sensor->append_node(film);
+				}
+				scene->append_node(sensor);
 			}
 			{
+				// emitters
+				const nlohmann::json &emitterJson = json.at("mitsuba").at("emitters");
+
+				{
+					// emitter 0: constant
+					xml_node<> *emitter = doc.allocate_node(node_element, "emitter");
+					xml_attribute<> *emitterAttr = doc.allocate_attribute("type", "constant");
+					emitter->append_attribute(emitterAttr);
+					{
+						xml_node<> *spectrum = doc.allocate_node(node_element, "spectrum");
+						xml_attribute<> *spectrumAttr = doc.allocate_attribute("name", "radiance");
+						spectrum->append_attribute(spectrumAttr);
+						char buf[255];
+						snprintf(buf, 255, "%f", emitterJson.at("constant").get<float>());
+						char *radiance_value = doc.allocate_string(buf);
+						xml_attribute<> *radiance_valueAttr = doc.allocate_attribute("value", radiance_value);
+						spectrum->append_attribute(radiance_valueAttr);
+
+						emitter->append_node(spectrum);
+					}
+					scene->append_node(emitter);
+				}
+
+				// emitter 1: area light
+				// todo
+
+				// emitter 2: directional light
+				// todo
+			}
+			{
+				// floor/back
+				//   if camera views from above
+				// TODO!!
+			} {
+				// back
+				//   if camera views from below
+				// TODO!!
+			} {
+				// target shape
 				// TODO!!
 			}
+			doc.append_node(scene);
 		}
-		// here, we render in HDR format (because STB image supports HDR image!)
-
 		std::cout << doc << std::endl;
 		return 1.0;
+
+		//     <bsdf type="diffuse" id="bsdf-diffuse">
+		//         <rgb name="reflectance" value="0.18 0.18 0.18" />
+		//     </bsdf>
+
+		//     <texture type="checkerboard" id="texture-checkerboard">
+		//         <rgb name="color0" value="0.4" />
+		//         <rgb name="color1" value="0.2" />
+		//         <transform name="to_uv">
+		//             <scale x="8.000000" y="8.000000" />
+		//         </transform>
+		//     </texture>
+
+		//     <bsdf type="diffuse" id="bsdf-plane">
+		//         <ref name="reflectance" id="texture-checkerboard" />
+		//     </bsdf>
+
+		//     <bsdf type="plastic" id="bsdf-matpreview">
+		//         <rgb name="diffuse_reflectance" value="0.940, 0.271, 0.361" />
+		//         <float name="int_ior" value="1.9" />
+		//     </bsdf>
+
+		//     <shape type="serialized" id="shape-plane">
+		//         <string name="filename" value="matpreview.serialized" />
+		//         <integer name="shape_index" value="0" />
+		//         <transform name="to_world">
+		//             <rotate z="1" angle="-4.3" />
+		//             <matrix value="3.38818 -4.06354 0 -1.74958 4.06354 3.38818 0 1.43683 0 0 5.29076 -0.0120714 0 0 0 1" />
+		//         </transform>
+		//         <ref name="bsdf" id="bsdf-plane" />
+		//     </shape>
+
+		//     <shape type="serialized" id="shape-matpreview-interior">
+		//         <string name="filename" value="matpreview.serialized" />
+		//         <integer name="shape_index" value="1" />
+		//         <transform name="to_world">
+		//             <matrix value="1 0 0 0 0 1 0 0 0 0 1 0.0252155 0 0 0 1" />
+		//         </transform>
+		//         <ref name="bsdf" id="bsdf-diffuse" />
+		//     </shape>
+
+		//     <shape type="serialized" id="shape-matpreview-exterior">
+		//         <string name="filename" value="matpreview.serialized" />
+		//         <integer name="shape_index" value="2" />
+		//         <transform name="to_world">
+		//             <matrix value="0.614046 0.614047 0 -1.78814e-07 -0.614047 0.614046 0 2.08616e-07 0 0 0.868393 1.02569 0 0 0 1" />
+		//             <translate z="0.01" />
+		//         </transform>
+
+		//         <ref name="bsdf" id="bsdf-matpreview" />
+		//     </shape>
 
 		// write to file
 		std::ofstream xml(xmlPath);
@@ -150,14 +492,17 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 		cmd << "\"";
 		cmd << mitsubaExePath;
 		cmd << " ";
-		if (json.contains("variant"))
+		if (json.at("mitsuba").contains("variant"))
 		{
 			cmd << "-m ";
-			cmd << json.at("variant").get<std::string>();
+			cmd << json.at("mitsuba").at("variant").get<std::string>();
 			cmd << " ";
 		}
 		cmd << xmlPath;
 		cmd << "\"";
+
+		std::cout << cmd.str() << std::endl;
+
 		system(cmd.str().c_str());
 	}
 
