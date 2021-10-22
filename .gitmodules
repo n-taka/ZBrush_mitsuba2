@@ -4,3 +4,6 @@
 [submodule "submodule/tinyexr"]
 	path = submodule/tinyexr
 	url = https://github.com/syoyo/tinyexr.git
+[submodule "submodule/FromZ"]
+	path = submodule/FromZ
+	url = https://github.com/n-taka/FromZ.git

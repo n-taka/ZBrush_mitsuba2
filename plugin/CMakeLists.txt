@@ -66,6 +66,7 @@ target_include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/tinyexr
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/tinyexr/deps/miniz
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/rapidxml-1.13
+    ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/FromZ/src
 )
 #########################
 ##### Include (end) #####

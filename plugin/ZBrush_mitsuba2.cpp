@@ -10,7 +10,8 @@
 #include <sstream>
 #include <fstream>
 
-#include "igl/read_triangle_mesh.h"
+#include "readGoZFile.h"
+#include "igl/write_triangle_mesh.h"
 
 // debug
 #include <iostream>
@@ -89,6 +90,7 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	const nlohmann::json json = nlohmann::json::parse(jsonString);
 	const std::string &rootString = json.at("root").get<std::string>();
 	const fs::path rootPath(rootString);
+	const std::string timeStamp = getCurrentTimestampAsString();
 
 	std::cout << json.dump(4) << std::endl;
 
@@ -96,23 +98,66 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	// calculate rotation of the mesh
 	//   Here we load GoZ file format (because such data contains complete information)
 	//   Then we export rotated mesh in ply format
+	Eigen::Matrix<double, 1, Eigen::Dynamic> center;
+	std::string meshName;
 	{
 		const std::string &meshFileRelPathStr = json.at("meshFile").get<std::string>();
 		fs::path meshFileRelPath(meshFileRelPathStr);
 		fs::path meshFilePath(rootPath);
 		meshFilePath /= meshFileRelPath;
 
-		// todo replace with GoZ
 		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> V;
 		Eigen::Matrix<int, Eigen::Dynamic, Eigen::Dynamic> F;
-		igl::read_triangle_mesh(meshFilePath.string(), V, F);
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> VC;
+		{
+			// igl::read_triangle_mesh(meshFilePath.string(), V, F);
+			std::vector<std::vector<double>> VVec;
+			std::vector<std::vector<int>> FVec;
+			std::vector<std::vector<std::pair<double, double>>> UVVec;
+			std::vector<std::vector<double>> VCVec;
+			std::vector<double> MVec;
+			std::vector<int> GVec;
+			// todo tweak for vertex colors
+			FromZ::readGoZFile(meshFilePath.string(), meshName, VVec, FVec, UVVec, VCVec, MVec, GVec);
+			int triCount = 0;
+			for (const auto &f : FVec)
+			{
+				triCount += (f.size() - 2);
+			}
+			V.resize(VVec.size(), 3);
+			for (int v = 0; v < VVec.size(); ++v)
+			{
+				V.row(v) << VVec.at(v).at(0), VVec.at(v).at(1), VVec.at(v).at(2);
+			}
+			VC.resize(VCVec.size(), 4);
+			for (int vc = 0; vc < VCVec.size(); ++vc)
+			{
+				VC.row(vc) << VCVec.at(vc).at(0), VCVec.at(vc).at(1), VCVec.at(vc).at(2);
+			}
+			F.resize(triCount, 3);
+			int fIdx = 0;
+			for (int f = 0; f < FVec.size(); ++f)
+			{
+				for (int tri = 0; tri < FVec.at(f).size() - 2; ++tri)
+				{
+					F.row(fIdx) << FVec.at(f).at(0), FVec.at(f).at(1 + tri), FVec.at(f).at(2 + tri);
+					fIdx++;
+				}
+			}
+		}
 
-		// scale
+		// scale / translate
 		//   In our setting, we scale so that its minimum bounding sphere has radius of 50.
 		//   * We use sphere so that sphere is rotational symmetry
 		{
+			// rotate
+			// change cooridnate system in ZBrush => mitsuba
+			//   rotate 180 degree around Z-axis
+			V.col(1) *= -1;
+			V.col(2) *= -1;
+
+			// scale
 			Eigen::Matrix<double, 3, Eigen::Dynamic> XP;
-			Eigen::Matrix<double, 1, Eigen::Dynamic> center;
 			XP.resize(3, V.cols());
 			center.resize(1, V.cols());
 			double radius = 0;
@@ -159,19 +204,37 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					}
 				}
 			}
+			V *= (50.0 / radius);
+			// translate
+			//   center of the bounding sphere is aligned on the Y axis
+			//   the lowest position of the mesh is aligned on the ground (y=0)
+			Eigen::Matrix<double, 1, Eigen::Dynamic> translation;
+			translation.resize(1, 3);
+			translation(0, 0) = -center(0, 0);
+			translation(0, 1) = -V.col(1).minCoeff();
+			translation(0, 2) = -center(0, 2);
+			V.rowwise() += translation;
+			center += translation;
 		}
+		fs::path meshPath(rootPath);
+		meshPath.append("mesh.ply");
+		// todo tweak for vertex colors
+		igl::write_triangle_mesh(meshPath.string(), V, F);
 	}
 
 	////
 	// setup xml
 	fs::path xmlPath(rootPath);
 	fs::path exrPath(rootPath);
-	const std::string timeStamp = getCurrentTimestampAsString();
 	{
-		std::string xmlFileName(timeStamp);
+		std::string xmlFileName(meshName);
+		xmlFileName += "_";
+		xmlFileName += timeStamp;
 		xmlFileName += ".xml";
 		xmlPath.append(xmlFileName);
-		std::string exrFileName(timeStamp);
+		std::string exrFileName(meshName);
+		exrFileName += "_";
+		exrFileName += timeStamp;
 		exrFileName += ".exr";
 		exrPath.append(exrFileName);
 
@@ -205,12 +268,17 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					xml_attribute<> *transformAttr = doc.allocate_attribute("name", "to_world");
 					transform->append_attribute(transformAttr);
 					{
-						// todo
 						// mitsuba2 is Y-up coordinate
 						xml_node<> *lookat = doc.allocate_node(node_element, "lookat");
-						xml_attribute<> *targetAttr = doc.allocate_attribute("target", "0.0, 0.0, 0.0");
+						char buf[255];
+						snprintf(buf, 255, "%f, %f, %f", center(0, 0), center(0, 1), center(0, 2));
+						char *target_value = doc.allocate_string(buf);
+						xml_attribute<> *targetAttr = doc.allocate_attribute("target", target_value);
 						lookat->append_attribute(targetAttr);
-						xml_attribute<> *originAttr = doc.allocate_attribute("origin", "0.0, 0.0, 100.0");
+						// todo tweak sensor position based on camera angle in ZBrush
+						snprintf(buf, 255, "%f, %f, %f", center(0, 0), center(0, 1), center(0, 2) + 100);
+						char *origin_value = doc.allocate_string(buf);
+						xml_attribute<> *originAttr = doc.allocate_attribute("origin", origin_value);
 						lookat->append_attribute(originAttr);
 						xml_attribute<> *upAttr = doc.allocate_attribute("up", "0.0, 1.0, 0.0");
 						lookat->append_attribute(upAttr);
@@ -418,7 +486,6 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 			doc.append_node(scene);
 		}
 		std::cout << doc << std::endl;
-		return 1.0;
 
 		//     <bsdf type="diffuse" id="bsdf-diffuse">
 		//         <rgb name="reflectance" value="0.18 0.18 0.18" />
@@ -477,6 +544,8 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 		xml << declaration;
 		xml << doc;
 	}
+
+	return 0.0;
 
 	////
 	// call mitsuba executable

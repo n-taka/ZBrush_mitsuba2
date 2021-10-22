@@ -8,9 +8,9 @@ void main()
     char buf[255];
     {
         nlohmann::json json;
-        json["root"] = "./build/Release/";
+        json["root"] = "./build/Release/data";
         json["format"] = "png";
-        json["meshFile"] = "data/Armadillo.ply";
+        json["meshFile"] = "Head.GoZ";
         json["mitsuba"] = nlohmann::json::object();
         json["mitsuba"]["variant"] = "scalar_spectral";
         json["mitsuba"]["sensor"] = nlohmann::json::object();
