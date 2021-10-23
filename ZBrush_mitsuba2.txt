@@ -1,0 +1,73 @@
+[VarDef, currentTool]
+[VarDef, XYZSize]
+[VarDef, useGizmo]
+[VarDef, sXpos, 0]
+[VarDef, sYpos, 0]
+[VarDef, sZpos, 0]
+[VarDef, eXpos, 0]
+[VarDef, eYpos, 0]
+[VarDef, eZpos, 0]
+[VarDef, YPlusX, 0]
+[VarDef, YPlusY, 0]
+[VarDef, YPlusZ, 0]
+[VarDef, XMinusX, 0]
+[VarDef, XMinusY, 0]
+[VarDef, XMinusZ, 0]
+[VarDef, camViewX, 0]
+[VarDef, camViewY, 0]
+[VarDef, camViewZ, 0]
+
+[IButton, "DebugBtn", "debug", 
+    [IFreeze,
+        ////
+        // store index of current tool
+        [VarSet, currentTool, [IGet,Tool:ItemInfo]]
+        // export to GoZ file
+        // todo
+
+        ////
+        // set to PolyMesh 3D (for making sure that we successfully draw Transpose Action Line)
+        // We draw Action Line from mesh to out of canvas
+        // https://www.zbrushcentral.com/t/transformset-gimbal-lock-workaround/310971/8
+        [ISet,Tool:ItemInfo,41]
+        [IPress,Transform:Fit]
+        // store current parameters
+        [VarSet,XYZSize,[IGet,Tool:Geometry:XYZ Size]]
+        [VarSet,useGizmo,[IGet, Transform:Gizmo 3D]]
+        [ISet,Tool:Geometry:XYZ Size,20]
+        [IPress,Transform:Move]
+        [IUnPress,Transform:Gizmo 3D]
+        [IClick,1004,(Document:Width*.5)+100, (Document:Height*.5),(Document:Width*.5)+100,(Document:Width+100)] //‘1004’ is the numerical ID of the canvas
+        [TransposeGet, sXpos, sYpos, sZpos, eXpos, eYpos, eZpos]
+        [VarSet, YPlusX, (#eXpos - #sXpos)]
+        [VarSet, YPlusY, (#eYpos - #sYpos)]
+        [VarSet, YPlusZ, (#eZpos - #sZpos)]
+        [IClick,1004,(Document:Width*.5), (Document:Height*.5),-100,(Document:Height*.5)] //‘1004’ is the numerical ID of the canvas
+        [TransposeGet, sXpos, sYpos, sZpos, eXpos, eYpos, eZpos]
+        [VarSet, XMinusX, (#eXpos - #sXpos)]
+        [VarSet, XMinusY, (#eYpos - #sYpos)]
+        [VarSet, XMinusZ, (#eZpos - #sZpos)]
+        [VarSet, camViewX, ((#YPlusY * #XMinusZ)-(#YPlusZ * #XMinusY))]
+        [VarSet, camViewY, ((#YPlusZ * #XMinusX)-(#YPlusX * #XMinusZ))]
+        [VarSet, camViewZ, ((#YPlusX * #XMinusY)-(#YPlusY * #XMinusX))]
+        // restore parameters
+        [ISet,Tool:Geometry:XYZ Size,#XYZSize]
+        [If, useGizmo, [IPress,Transform:Gizmo 3D], [IUnPress,Transform:Gizmo 3D]]
+        // restore currentTool
+        [ISet,Tool:ItemInfo,#currentTool]
+        [IPress,Transform:Fit]
+
+        ////
+        // generate JSON string
+        // todo
+
+        ////
+        // call dll function
+        // todo
+    ]
+
+    // debug
+    [Note, [StrMerge, #YPlusX, ", ", #YPlusY, ", ", #YPlusZ]]
+    [Note, [StrMerge, #XMinusX, ", ", #XMinusY, ", ", #XMinusZ]]
+    [Note, [StrMerge, #camViewX, ", ", #camViewY, ", ", #camViewZ]]
+]
