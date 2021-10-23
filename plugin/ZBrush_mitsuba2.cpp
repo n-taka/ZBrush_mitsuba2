@@ -11,7 +11,8 @@
 #include <fstream>
 
 #include "readGoZFile.h"
-#include "igl/write_triangle_mesh.h"
+#include "igl/per_vertex_normals.h"
+#include "igl/writePLY.h"
 
 // debug
 #include <iostream>
@@ -55,13 +56,13 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	// parameters = {
 	// 	"root": "path/to/root/directory/of/this/plugin",
 	// 	"format": "jpg"|"jpeg"|"png"|"bmp"|"tga",
+	// 	"marginSize": margin_ratio [0.0, inf), // this parameter only guarantee that "at least", depends on fov value
 	// 	"mitsuba": {
 	// 	 "variant": "variant_for_rendering",
 	// 	 "sensor": { # we always use thinlens
 	//    "aperture_radius": size_of_aperture_radius,
-	//    "focal_length": "focal_length",
 	//    "fov": fov_value,
-	//    "focus_distance": distance_to_focal_plane,
+	//    "focus_distance": distance_to_focal_plane [-1.0, 1.0], // -1.0 => closest point on BSphere, 1.0 => fathest point on BSphere
 	//    "near_clip": distance_to_clipping_near,
 	//    "far_clip": distance_to_clipping_far,
 	//    "sampler": {
@@ -90,6 +91,12 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	const nlohmann::json json = nlohmann::json::parse(jsonString);
 	const std::string &rootString = json.at("root").get<std::string>();
 	const fs::path rootPath(rootString);
+	fs::path dataPath(rootPath);
+	dataPath.append("data");
+	if (!fs::exists(dataPath))
+	{
+		fs::create_directories(dataPath);
+	}
 	const std::string timeStamp = getCurrentTimestampAsString();
 
 	std::cout << json.dump(4) << std::endl;
@@ -98,12 +105,14 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	// calculate rotation of the mesh
 	//   Here we load GoZ file format (because such data contains complete information)
 	//   Then we export rotated mesh in ply format
+	const double BSphereRadius = 50.0;
 	Eigen::Matrix<double, 1, Eigen::Dynamic> center;
 	std::string meshName;
+	bool hasVC = false;
 	{
 		const std::string &meshFileRelPathStr = json.at("meshFile").get<std::string>();
 		fs::path meshFileRelPath(meshFileRelPathStr);
-		fs::path meshFilePath(rootPath);
+		fs::path meshFilePath(dataPath);
 		meshFilePath /= meshFileRelPath;
 
 		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> V;
@@ -132,7 +141,7 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 			VC.resize(VCVec.size(), 4);
 			for (int vc = 0; vc < VCVec.size(); ++vc)
 			{
-				VC.row(vc) << VCVec.at(vc).at(0), VCVec.at(vc).at(1), VCVec.at(vc).at(2);
+				VC.row(vc) << VCVec.at(vc).at(0), VCVec.at(vc).at(1), VCVec.at(vc).at(2), VCVec.at(vc).at(3);
 			}
 			F.resize(triCount, 3);
 			int fIdx = 0;
@@ -204,7 +213,7 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					}
 				}
 			}
-			V *= (50.0 / radius);
+			V *= (BSphereRadius / radius);
 			// translate
 			//   center of the bounding sphere is aligned on the Y axis
 			//   the lowest position of the mesh is aligned on the ground (y=0)
@@ -216,16 +225,29 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 			V.rowwise() += translation;
 			center += translation;
 		}
-		fs::path meshPath(rootPath);
+		fs::path meshPath(dataPath);
 		meshPath.append("mesh.ply");
 		// todo tweak for vertex colors
-		igl::write_triangle_mesh(meshPath.string(), V, F);
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> N;
+		igl::per_vertex_normals(V, F, N);
+		Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic> UV;
+		UV.resize(0, 2);
+		if (V.rows() == VC.rows())
+		{
+			hasVC = true;
+			// we shouldn't add alpha channel (somehow mesh_attribute texture fails when we add alpha...)
+			igl::writePLY(meshPath.string(), V, F, N, UV, VC.block(0, 0, VC.rows(), 3), std::vector<std::string>({std::string("r"), std::string("g"), std::string("b")}));
+		}
+		else
+		{
+			igl::writePLY(meshPath.string(), V, F, N, UV);
+		}
 	}
 
 	////
 	// setup xml
-	fs::path xmlPath(rootPath);
-	fs::path exrPath(rootPath);
+	fs::path xmlPath(dataPath);
+	fs::path exrPath(dataPath);
 	{
 		std::string xmlFileName(meshName);
 		xmlFileName += "_";
@@ -255,6 +277,7 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 				integrator->append_attribute(integratorAttr);
 				scene->append_node(integrator);
 			}
+			Eigen::Matrix<double, 1, Eigen::Dynamic> cameraPosition;
 			{
 				// sensor
 				const nlohmann::json &sensorJson = json.at("mitsuba").at("sensor");
@@ -269,14 +292,22 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					transform->append_attribute(transformAttr);
 					{
 						// mitsuba2 is Y-up coordinate
+						cameraPosition = center;
+						// todo
+						// tweak sensor position based on camera angle in ZBrush
+						Eigen::Matrix<double, 1, Eigen::Dynamic> unitVectorFromTargetToCamera;
+						unitVectorFromTargetToCamera.resize(1, 3);
+						unitVectorFromTargetToCamera << 0.0, 0.0, 1.0;
+						const double BSphereRadiusWithMargin = (BSphereRadius * (1.0 + json.at("marginSize").get<float>()));
+						const double dist = BSphereRadiusWithMargin / std::sin(0.5 * json.at("mitsuba").at("sensor").at("fov").get<double>() * M_PI / 180.0);
+						cameraPosition += dist * (unitVectorFromTargetToCamera);
 						xml_node<> *lookat = doc.allocate_node(node_element, "lookat");
 						char buf[255];
 						snprintf(buf, 255, "%f, %f, %f", center(0, 0), center(0, 1), center(0, 2));
 						char *target_value = doc.allocate_string(buf);
 						xml_attribute<> *targetAttr = doc.allocate_attribute("target", target_value);
 						lookat->append_attribute(targetAttr);
-						// todo tweak sensor position based on camera angle in ZBrush
-						snprintf(buf, 255, "%f, %f, %f", center(0, 0), center(0, 1), center(0, 2) + 100);
+						snprintf(buf, 255, "%f, %f, %f", cameraPosition(0, 0), cameraPosition(0, 1), cameraPosition(0, 2));
 						char *origin_value = doc.allocate_string(buf);
 						xml_attribute<> *originAttr = doc.allocate_attribute("origin", origin_value);
 						lookat->append_attribute(originAttr);
@@ -304,13 +335,16 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					xml_node<> *focus_distance = doc.allocate_node(node_element, "float");
 					xml_attribute<> *focus_distance_nameAttr = doc.allocate_attribute("name", "focus_distance");
 					focus_distance->append_attribute(focus_distance_nameAttr);
+					double focusDist = (center - cameraPosition).norm();
+					focusDist += (sensorJson.at("focus_distance").get<double>() * BSphereRadius);
 					char buf[255];
-					snprintf(buf, 255, "%f", sensorJson.at("focus_distance").get<float>());
+					snprintf(buf, 255, "%f", static_cast<float>(focusDist));
 					char *focus_distance_value = doc.allocate_string(buf);
 					xml_attribute<> *focus_distance_valueAttr = doc.allocate_attribute("value", focus_distance_value);
 					focus_distance->append_attribute(focus_distance_valueAttr);
 					sensor->append_node(focus_distance);
 				}
+#if 0
 				if (sensorJson.contains("focal_length"))
 				{
 					// focal_length
@@ -325,26 +359,54 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 				else if (sensorJson.contains("fov"))
 				{
 					// fov
+					{
+						xml_node<> *fov = doc.allocate_node(node_element, "float");
+						xml_attribute<> *fov_nameAttr = doc.allocate_attribute("name", "fov");
+						fov->append_attribute(fov_nameAttr);
+						char buf[255];
+						snprintf(buf, 255, "%f", sensorJson.at("fov").get<float>());
+						char *fov_value = doc.allocate_string(buf);
+						xml_attribute<> *fov_valueAttr = doc.allocate_attribute("value", fov_value);
+						fov->append_attribute(fov_valueAttr);
+						sensor->append_node(fov);
+					}
+					// fov_axis
+					{
+						xml_node<> *fov_axis = doc.allocate_node(node_element, "string");
+						xml_attribute<> *fov_axis_nameAttr = doc.allocate_attribute("name", "fov_axis");
+						fov_axis->append_attribute(fov_axis_nameAttr);
+						// fov_axis: x is default value, but we explicitly set to "x" (possibly, this could be updated later...)
+						xml_attribute<> *fov_axis_valueAttr = doc.allocate_attribute("value", "x");
+						fov_axis->append_attribute(fov_axis_valueAttr);
+						sensor->append_node(fov_axis);
+					}
+				}
+#else
+				// fov
+				{
 					xml_node<> *fov = doc.allocate_node(node_element, "float");
 					xml_attribute<> *fov_nameAttr = doc.allocate_attribute("name", "fov");
 					fov->append_attribute(fov_nameAttr);
+					const double distCameraToTarget = (center - cameraPosition).norm();
+					double fovRad = std::asin((BSphereRadius * (1.0 + json.at("marginSize").get<float>())) / distCameraToTarget);
 					char buf[255];
-					snprintf(buf, 255, "%f", sensorJson.at("fov").get<float>());
+					snprintf(buf, 255, "%f", fovRad * 2.0 * 180.0 / M_PI);
 					char *fov_value = doc.allocate_string(buf);
 					xml_attribute<> *fov_valueAttr = doc.allocate_attribute("value", fov_value);
 					fov->append_attribute(fov_valueAttr);
 					sensor->append_node(fov);
 				}
+				// fov_axis
 				{
-					// fov_axis
 					xml_node<> *fov_axis = doc.allocate_node(node_element, "string");
 					xml_attribute<> *fov_axis_nameAttr = doc.allocate_attribute("name", "fov_axis");
 					fov_axis->append_attribute(fov_axis_nameAttr);
 					// fov_axis: x is default value, but we explicitly set to "x" (possibly, this could be updated later...)
-					xml_attribute<> *fov_axis_valueAttr = doc.allocate_attribute("value", "x");
+					xml_attribute<> *fov_axis_valueAttr = doc.allocate_attribute("value", "smaller");
 					fov_axis->append_attribute(fov_axis_valueAttr);
 					sensor->append_node(fov_axis);
 				}
+#endif
 				{
 					// near_clip
 					xml_node<> *near_clip = doc.allocate_node(node_element, "float");
@@ -465,78 +527,367 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 					scene->append_node(emitter);
 				}
 
-				// emitter 1: area light
-				// todo
+				{
+					// emitter 1: area light (1)
+					// <shape type="sphere">
+					// 	<emitter type="area">
+					// 		<spectrum name="radiance" value="1.000000"/>
+					// 	</emitter>
+					// 	<transform name="to_world">
+					// 		<translate x="500.000000" y="89.059668" z="402.218123"/>
+					// 	</transform>
+					// </shape>
+					xml_node<> *shape = doc.allocate_node(node_element, "shape");
+					xml_attribute<> *shapeAttr = doc.allocate_attribute("type", "sphere");
+					shape->append_attribute(shapeAttr);
+					{
+						xml_node<> *radius = doc.allocate_node(node_element, "float");
+						xml_attribute<> *radius_nameAttr = doc.allocate_attribute("name", "radius");
+						radius->append_attribute(radius_nameAttr);
+						xml_attribute<> *radius_valueAttr = doc.allocate_attribute("value", "100.0");
+						radius->append_attribute(radius_valueAttr);
+						shape->append_node(radius);
+					}
+					{
+						xml_node<> *emitter = doc.allocate_node(node_element, "emitter");
+						xml_attribute<> *emitterAttr = doc.allocate_attribute("type", "area");
+						emitter->append_attribute(emitterAttr);
+						{
+							xml_node<> *spectrum = doc.allocate_node(node_element, "spectrum");
+							xml_attribute<> *spectrumAttr = doc.allocate_attribute("name", "radiance");
+							spectrum->append_attribute(spectrumAttr);
+							char buf[255];
+							snprintf(buf, 255, "%f", emitterJson.at("area").get<float>());
+							char *spectrum_value = doc.allocate_string(buf);
+							xml_attribute<> *spectrum_valueAttr = doc.allocate_attribute("value", spectrum_value);
+							spectrum->append_attribute(spectrum_valueAttr);
 
-				// emitter 2: directional light
-				// todo
+							emitter->append_node(spectrum);
+						}
+						shape->append_node(emitter);
+					}
+					{
+						// transform
+						xml_node<> *transform = doc.allocate_node(node_element, "transform");
+						xml_attribute<> *transformAttr = doc.allocate_attribute("name", "to_world");
+						transform->append_attribute(transformAttr);
+						{
+							// mitsuba2 is Y-up coordinate
+							xml_node<> *translate = doc.allocate_node(node_element, "translate");
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 0) - 500.0f);
+								char *x_value = doc.allocate_string(buf);
+								xml_attribute<> *xAttr = doc.allocate_attribute("x", x_value);
+								translate->append_attribute(xAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 1) + 250.0f);
+								char *y_value = doc.allocate_string(buf);
+								xml_attribute<> *yAttr = doc.allocate_attribute("y", y_value);
+								translate->append_attribute(yAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 2));
+								char *z_value = doc.allocate_string(buf);
+								xml_attribute<> *zAttr = doc.allocate_attribute("z", z_value);
+								translate->append_attribute(zAttr);
+							}
+							transform->append_node(translate);
+						}
+						shape->append_node(transform);
+					}
+					scene->append_node(shape);
+				}
+				{
+					// emitter 2: area light (2)
+					xml_node<> *shape = doc.allocate_node(node_element, "shape");
+					xml_attribute<> *shapeAttr = doc.allocate_attribute("type", "sphere");
+					shape->append_attribute(shapeAttr);
+					{
+						xml_node<> *radius = doc.allocate_node(node_element, "float");
+						xml_attribute<> *radius_nameAttr = doc.allocate_attribute("name", "radius");
+						radius->append_attribute(radius_nameAttr);
+						xml_attribute<> *radius_valueAttr = doc.allocate_attribute("value", "100.0");
+						radius->append_attribute(radius_valueAttr);
+						shape->append_node(radius);
+					}
+					{
+						xml_node<> *emitter = doc.allocate_node(node_element, "emitter");
+						xml_attribute<> *emitterAttr = doc.allocate_attribute("type", "area");
+						emitter->append_attribute(emitterAttr);
+						{
+							xml_node<> *spectrum = doc.allocate_node(node_element, "spectrum");
+							xml_attribute<> *spectrumAttr = doc.allocate_attribute("name", "radiance");
+							spectrum->append_attribute(spectrumAttr);
+							char buf[255];
+							snprintf(buf, 255, "%f", emitterJson.at("area").get<float>());
+							char *spectrum_value = doc.allocate_string(buf);
+							xml_attribute<> *spectrum_valueAttr = doc.allocate_attribute("value", spectrum_value);
+							spectrum->append_attribute(spectrum_valueAttr);
+
+							emitter->append_node(spectrum);
+						}
+						shape->append_node(emitter);
+					}
+					{
+						// transform
+						xml_node<> *transform = doc.allocate_node(node_element, "transform");
+						xml_attribute<> *transformAttr = doc.allocate_attribute("name", "to_world");
+						transform->append_attribute(transformAttr);
+						{
+							// mitsuba2 is Y-up coordinate
+							xml_node<> *translate = doc.allocate_node(node_element, "translate");
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 0) + 500.0f);
+								char *x_value = doc.allocate_string(buf);
+								xml_attribute<> *xAttr = doc.allocate_attribute("x", x_value);
+								translate->append_attribute(xAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 1) + 50.0f);
+								char *y_value = doc.allocate_string(buf);
+								xml_attribute<> *yAttr = doc.allocate_attribute("y", y_value);
+								translate->append_attribute(yAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 2));
+								char *z_value = doc.allocate_string(buf);
+								xml_attribute<> *zAttr = doc.allocate_attribute("z", z_value);
+								translate->append_attribute(zAttr);
+							}
+							transform->append_node(translate);
+						}
+						shape->append_node(transform);
+					}
+					scene->append_node(shape);
+				}
+				{
+					// emitter 3: area light (3)
+					xml_node<> *shape = doc.allocate_node(node_element, "shape");
+					xml_attribute<> *shapeAttr = doc.allocate_attribute("type", "sphere");
+					shape->append_attribute(shapeAttr);
+					{
+						xml_node<> *radius = doc.allocate_node(node_element, "float");
+						xml_attribute<> *radius_nameAttr = doc.allocate_attribute("name", "radius");
+						radius->append_attribute(radius_nameAttr);
+						xml_attribute<> *radius_valueAttr = doc.allocate_attribute("value", "100.0");
+						radius->append_attribute(radius_valueAttr);
+						shape->append_node(radius);
+					}
+					{
+						xml_node<> *emitter = doc.allocate_node(node_element, "emitter");
+						xml_attribute<> *emitterAttr = doc.allocate_attribute("type", "area");
+						emitter->append_attribute(emitterAttr);
+						{
+							xml_node<> *spectrum = doc.allocate_node(node_element, "spectrum");
+							xml_attribute<> *spectrumAttr = doc.allocate_attribute("name", "radiance");
+							spectrum->append_attribute(spectrumAttr);
+							char buf[255];
+							snprintf(buf, 255, "%f", emitterJson.at("area").get<float>());
+							char *spectrum_value = doc.allocate_string(buf);
+							xml_attribute<> *spectrum_valueAttr = doc.allocate_attribute("value", spectrum_value);
+							spectrum->append_attribute(spectrum_valueAttr);
+
+							emitter->append_node(spectrum);
+						}
+						shape->append_node(emitter);
+					}
+					{
+						// transform
+						xml_node<> *transform = doc.allocate_node(node_element, "transform");
+						xml_attribute<> *transformAttr = doc.allocate_attribute("name", "to_world");
+						transform->append_attribute(transformAttr);
+						{
+							// mitsuba2 is Y-up coordinate
+							xml_node<> *translate = doc.allocate_node(node_element, "translate");
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 0) + 100.0f);
+								char *x_value = doc.allocate_string(buf);
+								xml_attribute<> *xAttr = doc.allocate_attribute("x", x_value);
+								translate->append_attribute(xAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 1) + 00.0f);
+								char *y_value = doc.allocate_string(buf);
+								xml_attribute<> *yAttr = doc.allocate_attribute("y", y_value);
+								translate->append_attribute(yAttr);
+							}
+							{
+								char buf[255];
+								// todo tweak sensor position based on camera angle in ZBrush
+								snprintf(buf, 255, "%f", cameraPosition(0, 2) + 150.0f);
+								char *z_value = doc.allocate_string(buf);
+								xml_attribute<> *zAttr = doc.allocate_attribute("z", z_value);
+								translate->append_attribute(zAttr);
+							}
+							transform->append_node(translate);
+						}
+						shape->append_node(transform);
+					}
+					scene->append_node(shape);
+				}
 			}
 			{
 				// floor/back
-				//   if camera views from above
-				// TODO!!
-			} {
+				// target shape
+				xml_node<> *shape = doc.allocate_node(node_element, "shape");
+				xml_attribute<> *shapeAttr = doc.allocate_attribute("type", "ply");
+				shape->append_attribute(shapeAttr);
+				{
+					xml_node<> *filename = doc.allocate_node(node_element, "string");
+					xml_attribute<> *filenameAttr = doc.allocate_attribute("name", "filename");
+					filename->append_attribute(filenameAttr);
+					xml_attribute<> *filename_valueAttr = doc.allocate_attribute("value", "base.ply");
+					filename->append_attribute(filename_valueAttr);
+
+					shape->append_node(filename);
+				}
+				{
+					xml_node<> *face_normals = doc.allocate_node(node_element, "boolean");
+					xml_attribute<> *face_normalsAttr = doc.allocate_attribute("name", "face_normals");
+					face_normals->append_attribute(face_normalsAttr);
+					xml_attribute<> *face_normals_valueAttr = doc.allocate_attribute("value", "true");
+					face_normals->append_attribute(face_normals_valueAttr);
+
+					shape->append_node(face_normals);
+				}
+				{
+					// bsdf
+					xml_node<> *bsdf = doc.allocate_node(node_element, "bsdf");
+					xml_attribute<> *bsdfAttr = doc.allocate_attribute("type", "diffuse");
+					bsdf->append_attribute(bsdfAttr);
+					{
+						xml_node<> *rgb = doc.allocate_node(node_element, "rgb");
+						xml_attribute<> *rgbAttr = doc.allocate_attribute("name", "reflectance");
+						rgb->append_attribute(rgbAttr);
+						xml_attribute<> *rgb_valueAttr = doc.allocate_attribute("value", "0.2, 0.25, 0.7");
+						rgb->append_attribute(rgb_valueAttr);
+
+						bsdf->append_node(rgb);
+					}
+					shape->append_node(bsdf);
+				}
+				scene->append_node(shape);
+			}
+			{
 				// back
 				//   if camera views from below
 				// TODO!!
 			} {
 				// target shape
-				// TODO!!
+				xml_node<> *shape = doc.allocate_node(node_element, "shape");
+				xml_attribute<> *shapeAttr = doc.allocate_attribute("type", "ply");
+				shape->append_attribute(shapeAttr);
+				{
+					xml_node<> *filename = doc.allocate_node(node_element, "string");
+					xml_attribute<> *filenameAttr = doc.allocate_attribute("name", "filename");
+					filename->append_attribute(filenameAttr);
+					xml_attribute<> *filename_valueAttr = doc.allocate_attribute("value", "mesh.ply");
+					filename->append_attribute(filename_valueAttr);
+
+					shape->append_node(filename);
+				}
+				{
+					// bsdf
+					xml_node<> *bsdf = doc.allocate_node(node_element, "bsdf");
+					xml_attribute<> *bsdfAttr = doc.allocate_attribute("type", "roughplastic");
+					bsdf->append_attribute(bsdfAttr);
+					if (hasVC)
+					{
+						xml_node<> *diffuse_reflectance = doc.allocate_node(node_element, "texture");
+						xml_attribute<> *diffuse_reflectanceTypeAttr = doc.allocate_attribute("type", "mesh_attribute");
+						diffuse_reflectance->append_attribute(diffuse_reflectanceTypeAttr);
+						xml_attribute<> *diffuse_reflectanceNameAttr = doc.allocate_attribute("name", "diffuse_reflectance");
+						diffuse_reflectance->append_attribute(diffuse_reflectanceNameAttr);
+						{
+							xml_node<> *vertex_color = doc.allocate_node(node_element, "string");
+							xml_attribute<> *vertex_colorNameAttr = doc.allocate_attribute("name", "name");
+							vertex_color->append_attribute(vertex_colorNameAttr);
+							xml_attribute<> *vertex_colorValueAttr = doc.allocate_attribute("value", "vertex_color");
+							vertex_color->append_attribute(vertex_colorValueAttr);
+
+							diffuse_reflectance->append_node(vertex_color);
+						}
+
+						bsdf->append_node(diffuse_reflectance);
+					}
+					else
+					{
+						xml_node<> *diffuse_reflectance = doc.allocate_node(node_element, "spectrum");
+						xml_attribute<> *diffuse_reflectanceAttr = doc.allocate_attribute("name", "diffuse_reflectance");
+						diffuse_reflectance->append_attribute(diffuse_reflectanceAttr);
+						xml_attribute<> *diffuse_reflectance_valueAttr = doc.allocate_attribute("value", "0.5");
+						diffuse_reflectance->append_attribute(diffuse_reflectance_valueAttr);
+
+						bsdf->append_node(diffuse_reflectance);
+					}
+
+					{
+						// int_ior
+						// PVC, 1.52 -- 1.55
+						xml_node<> *int_ior = doc.allocate_node(node_element, "float");
+						xml_attribute<> *int_iorAttr = doc.allocate_attribute("name", "int_ior");
+						int_ior->append_attribute(int_iorAttr);
+						xml_attribute<> *int_ior_valueAttr = doc.allocate_attribute("value", "1.535");
+						int_ior->append_attribute(int_ior_valueAttr);
+
+						bsdf->append_node(int_ior);
+					}
+					{
+						// ext_ior
+						// Air, 1.000277
+						xml_node<> *ext_ior = doc.allocate_node(node_element, "float");
+						xml_attribute<> *ext_iorAttr = doc.allocate_attribute("name", "ext_ior");
+						ext_ior->append_attribute(ext_iorAttr);
+						xml_attribute<> *ext_ior_valueAttr = doc.allocate_attribute("value", "1.000277");
+						ext_ior->append_attribute(ext_ior_valueAttr);
+
+						bsdf->append_node(ext_ior);
+					}
+					{
+						// distribution
+						xml_node<> *distribution = doc.allocate_node(node_element, "string");
+						xml_attribute<> *distributionAttr = doc.allocate_attribute("name", "distribution");
+						distribution->append_attribute(distributionAttr);
+						xml_attribute<> *distribution_valueAttr = doc.allocate_attribute("value", "beckmann");
+						distribution->append_attribute(distribution_valueAttr);
+
+						bsdf->append_node(distribution);
+					}
+					{
+						// alpha (roughness)
+						xml_node<> *alpha = doc.allocate_node(node_element, "float");
+						xml_attribute<> *alphaAttr = doc.allocate_attribute("name", "alpha");
+						alpha->append_attribute(alphaAttr);
+						xml_attribute<> *alpha_valueAttr = doc.allocate_attribute("value", "0.3");
+						alpha->append_attribute(alpha_valueAttr);
+
+						bsdf->append_node(alpha);
+					}
+
+					shape->append_node(bsdf);
+				}
+				scene->append_node(shape);
 			}
 			doc.append_node(scene);
 		}
 		std::cout << doc << std::endl;
-
-		//     <bsdf type="diffuse" id="bsdf-diffuse">
-		//         <rgb name="reflectance" value="0.18 0.18 0.18" />
-		//     </bsdf>
-
-		//     <texture type="checkerboard" id="texture-checkerboard">
-		//         <rgb name="color0" value="0.4" />
-		//         <rgb name="color1" value="0.2" />
-		//         <transform name="to_uv">
-		//             <scale x="8.000000" y="8.000000" />
-		//         </transform>
-		//     </texture>
-
-		//     <bsdf type="diffuse" id="bsdf-plane">
-		//         <ref name="reflectance" id="texture-checkerboard" />
-		//     </bsdf>
-
-		//     <bsdf type="plastic" id="bsdf-matpreview">
-		//         <rgb name="diffuse_reflectance" value="0.940, 0.271, 0.361" />
-		//         <float name="int_ior" value="1.9" />
-		//     </bsdf>
-
-		//     <shape type="serialized" id="shape-plane">
-		//         <string name="filename" value="matpreview.serialized" />
-		//         <integer name="shape_index" value="0" />
-		//         <transform name="to_world">
-		//             <rotate z="1" angle="-4.3" />
-		//             <matrix value="3.38818 -4.06354 0 -1.74958 4.06354 3.38818 0 1.43683 0 0 5.29076 -0.0120714 0 0 0 1" />
-		//         </transform>
-		//         <ref name="bsdf" id="bsdf-plane" />
-		//     </shape>
-
-		//     <shape type="serialized" id="shape-matpreview-interior">
-		//         <string name="filename" value="matpreview.serialized" />
-		//         <integer name="shape_index" value="1" />
-		//         <transform name="to_world">
-		//             <matrix value="1 0 0 0 0 1 0 0 0 0 1 0.0252155 0 0 0 1" />
-		//         </transform>
-		//         <ref name="bsdf" id="bsdf-diffuse" />
-		//     </shape>
-
-		//     <shape type="serialized" id="shape-matpreview-exterior">
-		//         <string name="filename" value="matpreview.serialized" />
-		//         <integer name="shape_index" value="2" />
-		//         <transform name="to_world">
-		//             <matrix value="0.614046 0.614047 0 -1.78814e-07 -0.614047 0.614046 0 2.08616e-07 0 0 0.868393 1.02569 0 0 0 1" />
-		//             <translate z="0.01" />
-		//         </transform>
-
-		//         <ref name="bsdf" id="bsdf-matpreview" />
-		//     </shape>
 
 		// write to file
 		std::ofstream xml(xmlPath);
@@ -545,16 +896,13 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 		xml << doc;
 	}
 
-	return 0.0;
-
 	////
 	// call mitsuba executable
 	{
-		fs::path mitsubaPath(rootPath);
-		mitsubaPath.append("resources");
-		mitsubaPath.append("mitsuba2");
-		fs::path mitsubaExePath(mitsubaPath);
-		mitsubaPath.append("mitsuba.exe");
+		fs::path mitsubaExePath(rootPath);
+		mitsubaExePath.append("resources");
+		mitsubaExePath.append("mitsuba2");
+		mitsubaExePath.append("mitsuba.exe");
 
 		// setup command
 		std::stringstream cmd;
@@ -622,8 +970,8 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 				}
 			}
 
-			fs::path imagePath(rootPath);
-			std::string imageFileName(timeStamp);
+			fs::path imagePath(dataPath);
+			std::string imageFileName(exrPath.stem().string());
 			imageFileName += ".";
 			imageFileName += format;
 			imagePath.append(imageFileName);
