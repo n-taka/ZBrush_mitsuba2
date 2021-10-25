@@ -13,6 +13,10 @@ void main()
         json["marginSize"] = 0.05;
         // json["meshFile"] = "PolySphere.GoZ";
         json["meshFile"] = "HeadColor.GoZ";
+        json["background"] = nlohmann::json::object();
+        json["background"]["r"] = 255.0f * 0.2f;
+        json["background"]["g"] = 255.0f * 0.25f;
+        json["background"]["b"] = 255.0f * 0.7f;
         json["mitsuba"] = nlohmann::json::object();
         json["mitsuba"]["variant"] = "scalar_spectral";
         json["mitsuba"]["sensor"] = nlohmann::json::object();

@@ -55,8 +55,14 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 	// [IN]
 	// parameters = {
 	// 	"root": "path/to/root/directory/of/this/plugin",
+	// 	"meshFile": "fileName of GoZ file, the mesh is, <root>/data/<meshFile>",
 	// 	"format": "jpg"|"jpeg"|"png"|"bmp"|"tga",
 	// 	"marginSize": margin_ratio [0.0, inf), // this parameter only guarantee that "at least", depends on fov value
+	//  "background": {
+	//   "r": [0, 255],
+	//   "g": [0, 255],
+	//   "b": [0, 255],
+	//  }
 	// 	"mitsuba": {
 	// 	 "variant": "variant_for_rendering",
 	// 	 "sensor": { # we always use thinlens
@@ -776,7 +782,10 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 						xml_node<> *rgb = doc.allocate_node(node_element, "rgb");
 						xml_attribute<> *rgbAttr = doc.allocate_attribute("name", "reflectance");
 						rgb->append_attribute(rgbAttr);
-						xml_attribute<> *rgb_valueAttr = doc.allocate_attribute("value", "0.2, 0.25, 0.7");
+						char buf[255];
+						snprintf(buf, 255, "%f, %f, %f", (json.at("background").at("r").get<float>() / 255.0f), (json.at("background").at("g").get<float>() / 255.0f), (json.at("background").at("b").get<float>() / 255.0f));
+						char *rgb_value = doc.allocate_string(buf);
+						xml_attribute<> *rgb_valueAttr = doc.allocate_attribute("value", rgb_value);
 						rgb->append_attribute(rgb_valueAttr);
 
 						bsdf->append_node(rgb);
