@@ -1,0 +1,377 @@
+////
+// varibales for ZFileUtils
+[VarDef,Zvers, 0]
+[VarDef,isMac, 0]
+[VarDef,separator, ""]
+[VarDef,dllPath, ""]
+[VarDef,dllVersion]
+// variables for our plugins
+[VarDef,pluginDllPath, ""]
+// variable for localization
+[VarDef,enLangFilePath, ""]
+// path to directory of this plugin
+[VarDef,rootPath, ""]
+[VarDef,tmpValue, 0]
+// variable for export
+[VarDef,subTName, ""]
+[VarDef,activeSubT, ""]
+[VarDef,activeSubTName, ""]
+[VarDef,currentTool, 0]
+[VarDef,XYZSize, 0]
+[VarDef,useGizmo, 0]
+[VarDef,perspective, 0]
+[VarDef,xFlip, 0]
+[VarDef,yFlip, 0]
+[VarDef,zFlip, 0]
+// variable for canvas info
+[VarDef,sXpos, 0]
+[VarDef,sYpos, 0]
+[VarDef,sZpos, 0]
+[VarDef,eXpos, 0]
+[VarDef,eYpos, 0]
+[VarDef,eZpos, 0]
+[VarDef,viewUpX, 0]
+[VarDef,viewUpY, 0]
+[VarDef,viewUpZ, 0]
+[VarDef,viewRightX, 0]
+[VarDef,viewRightY, 0]
+[VarDef,viewRightZ, 0]
+[VarDef,viewDirX, 0]
+[VarDef,viewDirY, 0]
+[VarDef,viewDirZ, 0]
+// variable for json string
+[VarDef, quote, [StrFromAsc, 34]]
+[MemCreate, jsonMem, 1024]
+[MemCreate, workingMem, 1024]
+[VarDef, bytesWritten, 0]
+
+//////
+// search dlls
+// from http://docs.pixologic.com/user-guide/customizing-zbrush/zscripting/zfileutils/#dllPath
+[RoutineDef, CheckSystem,	
+    //check ZBrush version
+    [VarSet,Zvers,[ZBrushInfo,0]]
+    [If,[Val,Zvers] >= 2021.0,,	
+        [Note,"\Cff9923This zscript\Cffffff is not designed for this version of 
+            \Cff9923ZBrush\Cffffff.",,3,4737096,,300]
+        [Exit]
+    ]
+    [VarSet,isMac, [ZBrushInfo,6]]	//check Mac or PC
+                                    // Make sure we have the dll and set its path
+    [If,[ZBrushInfo,16]==64,//64 bit
+        [If,isMac,
+            //use the path below for testing only
+            [VarSet,rootPath,"mitsuba2_shooter_2021/"]
+            //use the path below for installed plugins
+            // [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
+            [VarSet, rootPath, [FileNameResolvePath, #rootPath]]
+
+            [VarSet,dllPath,[StrMerge, #rootPath,"ZFileUtils.lib"]]
+            [VarSet,pluginDllPath,[StrMerge, #rootPath,"mitsuba2_shooter.lib"]]
+            [VarSet,enLangFilePath,[StrMerge, #rootPath,"lang/mitsuba2_shooter_2021_en.xml"]]
+            [VarSet,separator,"/"]
+        ,
+            //use the path below for testing only
+            [VarSet,rootPath,"mitsuba2_shooter_2021/"]
+            //use the path below for installed plugins
+            // [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
+            [VarSet, rootPath, [FileNameResolvePath, #rootPath]]
+            [Loop, [StrLength, rootPath],
+                [VarSet, tmpValue, [StrFind, "\", rootPath]]
+                [If, #tmpValue > -1,
+                    [VarSet, rootPath, [StrMerge, [StrExtract, rootPath, 0, tmpValue-1], "/", [StrExtract, rootPath, tmpValue+1, [StrLength, rootPath]-1]]],
+                    [LoopExit]
+                ]
+            ]
+
+            [VarSet,dllPath,[StrMerge, #rootPath,"ZFileUtils64.dll"]]
+            [VarSet,pluginDllPath,[StrMerge, #rootPath,"mitsuba2_shooter.dll"]]
+            [VarSet,enLangFilePath,[StrMerge, #rootPath,"lang/mitsuba2_shooter_2021_en.xml"]]
+            [VarSet,separator,"/"]
+        ]
+    ,//else 32 bit - no longer supported
+        [Note,"\Cff9923This zscript\Cffffff is not designed for this version of 
+            \Cff9923ZBrush\Cffffff.",,3,4737096,,300]
+        [Exit]
+    ]
+
+    [If, [FileExists, [Var,dllPath]] && [FileExists, [Var,pluginDllPath]] && [FileExists, [Var,enLangFilePath]],
+        //check that correct version
+        [VarSet, dllVersion, [FileExecute, [Var,dllPath], Version]]
+        [If, #dllVersion >= 8.0,//dll version
+            //OK
+        ,//else earlier version			
+            [Note,"\Cff9923Note :\Cc0c0c0 The \Cff9923 ZFileUtils plugin \CffffffDLL\Cc0c0c0 is 
+                an earlier version which does not support this plugin.  Please install correct version."]
+            [Exit]
+        ]
+    , // else no DLL.
+        [Note,"\Cff9923Note :\Cc0c0c0 The \Cff9923 ZFileUtils plugin \CffffffDLL\Cc0c0c0 could
+            not be found at the correct location.  Please re-install the plugin, making sure the 
+            relevant files and folders are in the \CffffffZStartup/ZPlugs\Cc0c0c0 folder."]
+        [Exit]
+    ]
+]
+//////
+
+//////
+// translation routine
+// from http://docs.pixologic.com/user-guide/customizing-zbrush/zscripting/zfileutils/localization/
+[RoutineDef, ZFU_RegisterLocalizationFile,
+	[FileExecute, #dllPath, RegisterLocalizationFile, enFilePath]
+, enFilePath]
+//////
+
+//////
+// write str to mem (+ auto-resize)
+// note that strFragment must < 255 chars
+[RoutineDef, writeStrFragmentToJsonMem,
+    [If, [StrLength, strFragment]+#bytesWritten > [MemGetSize, jsonMem],
+        [MemCopy, jsonMem, 0, workingMem, 0, #bytesWritten]
+        [MemResize, jsonMem, [MemGetSize, jsonMem]+1024]
+        [MemCopy, workingMem, 0, jsonMem, 0, #bytesWritten]
+        [MemResize, workingMem, [MemGetSize, jsonMem]]
+    ]
+    [MemWriteString, jsonMem, strFragment, #bytesWritten]
+    [VarAdd, bytesWritten, [StrLength, strFragment]]
+, strFragment]
+
+//////
+// startup
+[RoutineCall, CheckSystem]
+// [RoutineCall, ZFU_RegisterLocalizationFile, [FileNameResolvePath, #enLangFilePath]]
+
+//////
+// UI
+[ISubPalette, ZPlugin:Mitsuba2 Shooter]
+// slider for... 
+[ISlider, ZPlugin:Mitsuba2 Shooter:Aperture radius, 0.1, 0.1, 0.0, 10.0,
+    "Aperture radius", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Focus distance, 0.0, 0.01, -1.0, 1.0,
+    "Focus distance\n-1.0: closest point on the bounding sphere\n 1.0: fathest point on the bounding sphere", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:FOV, 15.0, 0.01, 0.01, 179.99,
+    "Field of view (in degree)", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Near clip, 0.01, 0.01, 0.01, 10000.0,
+    "Near clip", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Far clip, 10000.0, 0.01, 0.01, 10000.0,
+    "Far clip", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Margin size, 0.05, 0.01, 0.0, 1.0,
+    "Margin size on the rim of the rendered image", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Sample count, 64, 1, 1, 1024,
+    "Sample count for path tracing", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Width, 1280, 1, 1, 3840,
+    "Width of the rendered image", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Height, 720, 1, 1, 2160,
+    "Height of the rendered image", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Constant, 0.5, 0.0, 0.01, 10.0,
+    "Radiance for constant emitter", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Area, 100.0, 0.0, 0.01, 1000.0,
+    "Radiance for area emitter", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:R, 51.0, 0.1, 0.0, 255.0,
+    "R value for background", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:G, 51.0, 0.1, 0.0, 255.0,
+    "G value for background", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:B, 51.0, 0.1, 0.0, 255.0,
+    "B value for background", , 0, 1]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:PNG, 1, "Export PNG image", , , 0, 0.25]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:JPEG, 0, "Export JPEG image", , , 0, 0.25]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:GMP, 0, "Export BMP image", , , 0, 0.25]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:TGA, 0, "Export TGA image", , , 0, 0.25]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Scale, 1.0, 0.01, 0.01, 10.0,
+    "Scale for tone mapping", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Gamma, 2.2, 0.01, 0.01, 10.0,
+    "Gamma for tone mapping", , 0, 1]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:Open directory, 0, "Open directory after shooting", , , 0, 1]
+
+// button for shoot
+[IButton, ZPlugin:Mitsuba2 Shooter:Shoot, "Render with specified parameters", 
+    [IFreeze,
+        ////
+        // store index of current tool
+        [VarSet, currentTool, [IGet,Tool:ItemInfo]]
+        // store current export setting
+        [VarSet,xFlip,[IGet,Preferences:ImportExport:eFlipX]]
+        [VarSet,yFlip,[IGet,Preferences:ImportExport:eFlipY]]
+        [VarSet,zFlip,[IGet,Preferences:ImportExport:eFlipZ]]
+        // disable eFlip(X|Y|Z)
+        [IUnPress,Preferences:ImportExport:eFlipX]
+        [IUnPress,Preferences:ImportExport:eFlipY]
+        [IUnPress,Preferences:ImportExport:eFlipZ]
+        // export to GoZ file
+        [VarSet, subTName, [IGetTitle,Tool:ItemInfo]]
+        [VarSet, activeSubTName, [StrExtract, #subTName, 0, [StrLength, #subTName]-2]]
+        [FileNameSetNext, [StrMerge, #rootPath, #separator, "data", #separator, #activeSubTName, ".GoZ"]]
+        [IPress,Tool:Export]
+        // restore export setting
+        [If, xFlip, [IPress,Preferences:ImportExport:eFlipX], [IUnPress,Preferences:ImportExport:eFlipX]]
+        [If, yFlip, [IPress,Preferences:ImportExport:eFlipY], [IUnPress,Preferences:ImportExport:eFlipY]]
+        [If, zFlip, [IPress,Preferences:ImportExport:eFlipZ], [IUnPress,Preferences:ImportExport:eFlipZ]]
+
+        ////
+        // set to PolyMesh 3D (for making sure that we successfully draw Transpose Action Line)
+        // We draw Action Line from mesh to out of canvas
+        // https://www.zbrushcentral.com/t/transformset-gimbal-lock-workaround/310971/8
+        [ISet,Tool:ItemInfo,41]
+        [IPress,Transform:Fit]
+        // store current parameters
+        [VarSet,XYZSize,[IGet,Tool:Geometry:XYZ Size]]
+        [VarSet,useGizmo,[IGet, Transform:Gizmo 3D]]
+        [VarSet,perspective,[IGet, Draw:Perspective]]
+        // get directions
+        [ISet,Tool:Geometry:XYZ Size,20]
+        [IPress,Transform:Move]
+        [IUnPress,Transform:Gizmo 3D]
+        [IUnPress,Draw:Perspective]
+        [IClick,1004,(Document:Width*.5)+100, (Document:Height*.5),(Document:Width*.5)+100,-100]
+        [TransposeGet, sXpos, sYpos, sZpos, eXpos, eYpos, eZpos]
+        [VarSet, viewUpX, (#eXpos - #sXpos)]
+        [VarSet, viewUpY, (#eYpos - #sYpos)]
+        [VarSet, viewUpZ, (#eZpos - #sZpos)]
+        [IClick,1004,(Document:Width*.5),(Document:Height*.5),(Document:Width)+100,(Document:Height*.5)]
+        [TransposeGet, sXpos, sYpos, sZpos, eXpos, eYpos, eZpos]
+        [VarSet, viewRightX, (#eXpos - #sXpos)]
+        [VarSet, viewRightY, (#eYpos - #sYpos)]
+        [VarSet, viewRightZ, (#eZpos - #sZpos)]
+        [VarSet, viewDirX, ((#viewUpY * #viewRightZ)-(#viewUpZ * #viewRightY))]
+        [VarSet, viewDirY, ((#viewUpZ * #viewRightX)-(#viewUpX * #viewRightZ))]
+        [VarSet, viewDirZ, ((#viewUpX * #viewRightY)-(#viewUpY * #viewRightX))]
+        // restore parameters
+        [ISet,Tool:Geometry:XYZ Size,#XYZSize]
+        [If, useGizmo, [IPress,Transform:Gizmo 3D], [IUnPress,Transform:Gizmo 3D]]
+        [If, perspective, [IPress,Draw:Perspective], [IUnPress,Draw:Perspective]]
+        // restore currentTool
+        [ISet,Tool:ItemInfo,#currentTool]
+        [IPress,Transform:Fit]
+
+        ////
+        // generate JSON string
+        [RoutineCall, writeStrFragmentToJsonMem, "{"]
+            // rootPath
+            [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "root", #quote, ":", #quote, #rootPath, #quote, ","]]
+            // meshFile
+            [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "meshFile", #quote, ":", #quote, "data", #separator, #activeSubTName, ".GoZ", #quote, ","]]
+            // ZBrush
+            [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "ZBrush", #quote, ":{"]]
+                // ZBrush/viewDir
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "viewDir", #quote, ":{"]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "x", #quote, ":", #viewDirX, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "y", #quote, ":", #viewDirY, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "z", #quote, ":", #viewDirZ]]
+                [RoutineCall, writeStrFragmentToJsonMem, "},"]
+                // ZBrush/viewUp
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "viewUp", #quote, ":{"]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "x", #quote, ":", #viewUpX, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "y", #quote, ":", #viewUpY, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "z", #quote, ":", #viewUpZ]]
+                [RoutineCall, writeStrFragmentToJsonMem, "},"]
+                // ZBrush/viewRight
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "viewRight", #quote, ":{"]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "x", #quote, ":", #viewRightX, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "y", #quote, ":", #viewRightY, ","]]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "z", #quote, ":", #viewRightZ]]
+                [RoutineCall, writeStrFragmentToJsonMem, "}"]
+            [RoutineCall, writeStrFragmentToJsonMem, "},"]
+            // mitsuba
+            [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "mitsuba", #quote, ":{"]]
+                // mitsuba/variant
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "variant", #quote, ":", #quote, "scalar_spectral", #quote, ","]]
+                // mitsuba/sensor
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "sensor", #quote, ":{"]]
+                    // mitsuba/sensor/aperture_radius
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "aperture_radius", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Aperture radius], ","]]
+                    // mitsuba/sensor/focus_distance
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "focus_distance", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Focus distance], ","]]
+                    // mitsuba/sensor/fov
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "fov", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:FOV], ","]]
+                    // mitsuba/sensor/near_clip
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "near_clip", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Near clip], ","]]
+                    // mitsuba/sensor/far_clip
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "far_clip", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Far clip], ","]]
+                    // mitsuba/sensor/marginSize
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "marginSize", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Margin size], ","]]
+                    // mitsuba/sensor/sampler
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "sampler", #quote, ":{"]]
+                        // mitsuba/sensor/sampler/type (multijitter)
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "type", #quote, ":", #quote, "multijitter", #quote, ","]]
+                        // mitsuba/sensor/sampler/sample_count
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "sample_count", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Sample count]]]
+                    [RoutineCall, writeStrFragmentToJsonMem, "},"]
+                    // mitsuba/sensor/film
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "film", #quote, ":{"]]
+                        // mitsuba/sensor/film/width
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "width", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Width], ","]]
+                        // mitsuba/sensor/film/height
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "height", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Height], ","]]
+                        // mitsuba/sensor/film/rfilter (lanczos)
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "rfilter", #quote, ":", #quote, "lanczos", #quote]]
+                    [RoutineCall, writeStrFragmentToJsonMem, "}"]
+                [RoutineCall, writeStrFragmentToJsonMem, "},"]
+                // mitsuba/emitters
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "emitters", #quote, ":{"]]
+                    // mitsuba/emitters/constant
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "constant", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Constant], ","]]
+                    // mitsuba/emitters/area
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "area", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Area]]]
+                [RoutineCall, writeStrFragmentToJsonMem, "},"]
+                // mitsuba/shapes
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "shapes", #quote, ":{"]]
+                    // mitsuba/shapes/background
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "background", #quote, ":{"]]
+                        // mitsuba/shapes/background/r
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "r", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:R], ","]]
+                        // mitsuba/shapes/background/g
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "g", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:G], ","]]
+                        // mitsuba/shapes/background/b
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "b", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:B]]]
+                    [RoutineCall, writeStrFragmentToJsonMem, "}"]
+                [RoutineCall, writeStrFragmentToJsonMem, "}"]
+            [RoutineCall, writeStrFragmentToJsonMem, "},"]
+            // export
+            [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "export", #quote, ":{"]]
+                // export/format
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "format", #quote, ":["]]
+                    [If, [IGet, ZPlugin:Mitsuba2 Shooter:PNG],
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "png", #quote, ","]]
+                    ]
+                    [If, [IGet, ZPlugin:Mitsuba2 Shooter:JPEG],
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "jpeg", #quote, ","]]
+                    ]
+                    [If, [IGet, ZPlugin:Mitsuba2 Shooter:BMP],
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "bmp", #quote, ","]]
+                    ]
+                    [If, [IGet, ZPlugin:Mitsuba2 Shooter:TGA],
+                        [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "tga", #quote, ","]]
+                    ]
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "exr", #quote]]
+                [RoutineCall, writeStrFragmentToJsonMem, "],"]
+                // export/scale
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "scale", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Scale], ","]]
+                // export/gamma
+                [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "gamma", #quote, ":", [IGet, ZPlugin:Mitsuba2 Shooter:Gamma], ","]]
+                // export/openDirectory
+                [If, [IGet, ZPlugin:Mitsuba2 Shooter:Open directory],
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "openDirectory", #quote, ":", "true"]],
+                    [RoutineCall, writeStrFragmentToJsonMem, [StrMerge, #quote, "openDirectory", #quote, ":", "false"]]
+                ]
+            [RoutineCall, writeStrFragmentToJsonMem, "}"]
+        [RoutineCall, writeStrFragmentToJsonMem, "}"]
+
+        [MemResize, workingMem, #bytesWritten]
+        [MemCopy, jsonMem, 0, workingMem, 0, #bytesWritten]
+        [MemSaveToFile, workingMem, [StrMerge, #rootPath, #separator, "data", #separator, "parameters.txt"], 1]
+        [MemResize, jsonMem, 1024]
+        [MemResize, workingMem, 1024]
+        [VarSet, bytesWritten, 0]
+
+        ////
+        // call dll function
+        [FileExecute, #pluginDllPath, "render", [StrMerge, #rootPath, #separator, "data", #separator, "parameters.txt"]]
+    ]
+    , 0, 1
+]
+
+[IEnable, ZPlugin:Mitsuba2 Shooter:PNG]
+[IEnable, ZPlugin:Mitsuba2 Shooter:JPEG]
+[IEnable, ZPlugin:Mitsuba2 Shooter:GMP]
+[IEnable, ZPlugin:Mitsuba2 Shooter:TGA]
+[IEnable, ZPlugin:Mitsuba2 Shooter:Open directory]

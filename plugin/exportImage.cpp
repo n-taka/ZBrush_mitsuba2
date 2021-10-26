@@ -15,11 +15,7 @@ void exportImage(
 	const fs::path &exrImagePath,
 	const nlohmann::json &parameters)
 {
-	////
-	// convert image to specified format
-	const std::string format = parameters.at("format").get<std::string>();
-
-	if (format != "OpenEXR")
+	if (parameters.at("format").size() > 0)
 	{
 		float *out;
 		int width, height;
@@ -59,28 +55,33 @@ void exportImage(
 			}
 		}
 
-		fs::path imagePath(exrImagePath);
-		imagePath = imagePath.parent_path();
-		std::string imageFileName(exrImagePath.stem().string());
-		imageFileName += ".";
-		imageFileName += format;
-		imagePath.append(imageFileName);
-		if (format == "jpg" || format == "jpeg")
+		for (const auto &formatJson : parameters.at("format"))
 		{
-			// currently, quality == 90
-			stbi_write_jpg(imagePath.string().c_str(), width, height, channels, &(image[0]), 90);
-		}
-		else if (format == "png")
-		{
-			stbi_write_png(imagePath.string().c_str(), width, height, channels, &(image[0]), sizeof(unsigned char) * width * channels);
-		}
-		else if (format == "bmp")
-		{
-			stbi_write_bmp(imagePath.string().c_str(), width, height, channels, &(image[0]));
-		}
-		else if (format == "tga")
-		{
-			stbi_write_tga(imagePath.string().c_str(), width, height, channels, &(image[0]));
+			const std::string format = formatJson.get<std::string>();
+
+			fs::path imagePath(exrImagePath);
+			imagePath = imagePath.parent_path();
+			std::string imageFileName(exrImagePath.stem().string());
+			imageFileName += ".";
+			imageFileName += format;
+			imagePath.append(imageFileName);
+			if (format == "jpg" || format == "jpeg")
+			{
+				// currently, quality == 90
+				stbi_write_jpg(imagePath.string().c_str(), width, height, channels, &(image[0]), 90);
+			}
+			else if (format == "png")
+			{
+				stbi_write_png(imagePath.string().c_str(), width, height, channels, &(image[0]), sizeof(unsigned char) * width * channels);
+			}
+			else if (format == "bmp")
+			{
+				stbi_write_bmp(imagePath.string().c_str(), width, height, channels, &(image[0]));
+			}
+			else if (format == "tga")
+			{
+				stbi_write_tga(imagePath.string().c_str(), width, height, channels, &(image[0]));
+			}
 		}
 	}
 

@@ -1,5 +1,5 @@
-#ifndef ZBRUSH_MITSUBA2_H
-#define ZBRUSH_MITSUBA2_H
+#ifndef MITSUBA2_SHOOTER_H
+#define MITSUBA2_SHOOTER_H
 
 #if defined(_WIN32) || defined(_WIN64)
 #define DLLEXPORT __declspec(dllexport)

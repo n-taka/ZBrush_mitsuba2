@@ -46,7 +46,7 @@ target_link_libraries(
     PRIVATE
     nlohmann_json
     nlohmann_json::nlohmann_json
-    ZBrush_mitsuba2
+    mitsuba2_shooter
 )
 ###########################
 ##### Libraries (end) #####
@@ -91,7 +91,8 @@ endif ()
 #####################
 add_custom_command(TARGET ${PROJECT} POST_BUILD COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:${PROJECT}>/resources")
 add_custom_command(TARGET ${PROJECT} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/resources" "$<TARGET_FILE_DIR:${PROJECT}>/resources")
-add_custom_command(TARGET ${PROJECT} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/build/plugin/Release/ZBrush_mitsuba2.dll" "$<TARGET_FILE_DIR:${PROJECT}>")
+add_custom_command(TARGET ${PROJECT} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/build/plugin/Release/mitsuba2_shooter.dll" "$<TARGET_FILE_DIR:${PROJECT}>")
+add_custom_command(TARGET ${PROJECT} POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_CURRENT_SOURCE_DIR}/build/plugin/Release/mitsuba2_shooter.dll" "${CMAKE_CURRENT_SOURCE_DIR}/ZPlugs64/mitsuba2_shooter_2021/mitsuba2_shooter.dll")
 ###########################
 ##### Resources (end) #####
 ###########################

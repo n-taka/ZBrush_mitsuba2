@@ -1,7 +1,7 @@
-#ifndef ZBRUSH_MITSUBA2_CPP
-#define ZBRUSH_MITSUBA2_CPP
+#ifndef MITSUBA2_SHOOTER_CPP
+#define MITSUBA2_SHOOTER_CPP
 
-#include "ZBrush_mitsuba2.h"
+#include "mitsuba2_shooter.h"
 #include "nlohmann/json.hpp"
 #include "rapidxml.hpp"
 #include "rapidxml_print.hpp"
@@ -52,8 +52,10 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 {
 	////
 	// parse parameter (JSON)
-	std::string jsonString(someText);
-	nlohmann::json json = nlohmann::json::parse(jsonString);
+	fs::path jsonPath(someText);
+	std::ifstream ifs(jsonPath);
+	nlohmann::json json = nlohmann::json::parse(ifs);
+	ifs.close();
 	const std::string &rootString = json.at("root").get<std::string>();
 	const fs::path rootPath(rootString);
 	const std::string timeStamp = getCurrentTimestampAsString();
@@ -96,6 +98,53 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 		translation(0, 2) = -center(0, 2);
 		V.rowwise() += translation;
 		center += translation;
+		// rotate
+		Eigen::Matrix<float, 1, Eigen::Dynamic> ZBCanvasViewDir;
+		ZBCanvasViewDir.resize(1, 3);
+		ZBCanvasViewDir(0, 0) = 1.0 * json.at("ZBrush").at("viewDir").at("x").get<float>();
+		ZBCanvasViewDir(0, 1) = -1.0 * json.at("ZBrush").at("viewDir").at("y").get<float>();
+		ZBCanvasViewDir(0, 2) = -1.0 * json.at("ZBrush").at("viewDir").at("z").get<float>();
+		Eigen::Matrix<float, 1, Eigen::Dynamic> ZBCanvasViewUp;
+		ZBCanvasViewUp.resize(1, 3);
+		ZBCanvasViewUp(0, 0) = 1.0 * json.at("ZBrush").at("viewUp").at("x").get<float>();
+		ZBCanvasViewUp(0, 1) = -1.0 * json.at("ZBrush").at("viewUp").at("y").get<float>();
+		ZBCanvasViewUp(0, 2) = -1.0 * json.at("ZBrush").at("viewUp").at("z").get<float>();
+		Eigen::Matrix<float, 1, Eigen::Dynamic> ZBCanvasViewRight;
+		ZBCanvasViewRight.resize(1, 3);
+		ZBCanvasViewRight(0, 0) = 1.0 * json.at("ZBrush").at("viewRight").at("x").get<float>();
+		ZBCanvasViewRight(0, 1) = -1.0 * json.at("ZBrush").at("viewRight").at("y").get<float>();
+		ZBCanvasViewRight(0, 2) = -1.0 * json.at("ZBrush").at("viewRight").at("z").get<float>();
+		Eigen::Matrix<float, 1, Eigen::Dynamic> normalizedDir = ZBCanvasViewDir;
+		normalizedDir(0, 1) = 0;
+		normalizedDir.normalize();
+		if (std::abs(normalizedDir(0, 0)) > 1.0e-3)
+		{
+			const float cosValue = -1.0 * normalizedDir(0, 2);
+			const float rotAngle = std::acos(cosValue) * (normalizedDir(0, 0) / std::abs(normalizedDir(0, 0)));
+			const Eigen::Matrix<float, 3, 3> rotMatrix = Eigen::AngleAxisf(rotAngle, Eigen::Matrix<float, 1, 3>::UnitY()).toRotationMatrix().transpose();
+			V *= rotMatrix;
+			ZBCanvasViewDir *= rotMatrix;
+			ZBCanvasViewUp *= rotMatrix;
+			ZBCanvasViewRight *= rotMatrix;
+			std::cout << "cosValue: " << cosValue << std::endl;
+			std::cout << "rotAngle: " << rotAngle << std::endl;
+			std::cout << "ZBCanvasViewDir   : " << ZBCanvasViewDir << std::endl;
+			std::cout << "ZBCanvasViewUp    : " << ZBCanvasViewUp << std::endl;
+			std::cout << "ZBCanvasViewRight : " << ZBCanvasViewRight << std::endl;
+		}
+		json.at("mitsuba").at("sensor")["viewDir"] = nlohmann::json::object();
+		json.at("mitsuba").at("sensor").at("viewDir")["x"] = ZBCanvasViewDir(0, 0);
+		json.at("mitsuba").at("sensor").at("viewDir")["y"] = ZBCanvasViewDir(0, 1);
+		json.at("mitsuba").at("sensor").at("viewDir")["z"] = ZBCanvasViewDir(0, 2);
+		json.at("mitsuba").at("sensor")["viewUp"] = nlohmann::json::object();
+		json.at("mitsuba").at("sensor").at("viewUp")["x"] = ZBCanvasViewUp(0, 0);
+		json.at("mitsuba").at("sensor").at("viewUp")["y"] = ZBCanvasViewUp(0, 1);
+		json.at("mitsuba").at("sensor").at("viewUp")["z"] = ZBCanvasViewUp(0, 2);
+		json.at("mitsuba").at("sensor")["viewRight"] = nlohmann::json::object();
+		json.at("mitsuba").at("sensor").at("viewRight")["x"] = ZBCanvasViewRight(0, 0);
+		json.at("mitsuba").at("sensor").at("viewRight")["y"] = ZBCanvasViewRight(0, 1);
+		json.at("mitsuba").at("sensor").at("viewRight")["z"] = ZBCanvasViewRight(0, 2);
+
 		json.at("mitsuba").at("sensor")["BSphere"] = nlohmann::json::object();
 		json.at("mitsuba").at("sensor").at("BSphere")["radius"] = BSphereRadius;
 		json.at("mitsuba").at("sensor").at("BSphere")["center"] = nlohmann::json::object();
@@ -183,7 +232,7 @@ extern "C" DLLEXPORT float render(char *someText, double optValue, char *outputB
 
 	exportImage(exrPath, json.at("export"));
 
-	return 0.0;
+	return 1.0f;
 }
 
 #endif

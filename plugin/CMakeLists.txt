@@ -4,7 +4,7 @@ if(WIN32)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif ()
 
-set(PROJECT ZBrush_mitsuba2)
+set(PROJECT mitsuba2_shooter)
 project(${PROJECT})
 
 ##################
@@ -16,6 +16,7 @@ add_library(${PROJECT} SHARED)
 target_sources(
     ${PROJECT}
     PRIVATE
+    mitsuba2_shooter.cpp
     appendMitsubaBaseShape.cpp
     appendMitsubaEmitter.cpp
     appendMitsubaFilm.cpp
@@ -27,7 +28,6 @@ target_sources(
     exportImage.cpp
     getMinimumBoundingSphere.cpp
     readGoZAndTriangulate.cpp
-    ZBrush_mitsuba2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/tinyexr/deps/miniz/miniz.c
 )
 ########################
