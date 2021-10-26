@@ -24,6 +24,8 @@
         [VarSet, currentTool, [IGet,Tool:ItemInfo]]
         // store current export setting
         // todo
+        // disable eFlip(X|Y|Z)
+        // todo
         // export to GoZ file
         // todo
 

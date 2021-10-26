@@ -16,6 +16,17 @@ add_library(${PROJECT} SHARED)
 target_sources(
     ${PROJECT}
     PRIVATE
+    appendMitsubaBaseShape.cpp
+    appendMitsubaEmitter.cpp
+    appendMitsubaFilm.cpp
+    appendMitsubaIntegrator.cpp
+    appendMitsubaSampler.cpp
+    appendMitsubaScene.cpp
+    appendMitsubaSensor.cpp
+    appendMitsubaTargetShape.cpp
+    exportImage.cpp
+    getMinimumBoundingSphere.cpp
+    readGoZAndTriangulate.cpp
     ZBrush_mitsuba2.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/tinyexr/deps/miniz/miniz.c
 )
@@ -61,6 +72,7 @@ target_link_libraries(
 target_include_directories(
     ${PROJECT}
     PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${EIGEN3_INCLUDE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/stb_image
     ${CMAKE_CURRENT_SOURCE_DIR}/../submodule/tinyexr
