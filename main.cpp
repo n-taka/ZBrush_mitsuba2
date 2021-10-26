@@ -9,24 +9,21 @@ void main()
     {
         nlohmann::json json;
         json["root"] = "./build/Release";
-        // json["meshFile"] = "PolySphere.GoZ";
         json["meshFile"] = "data/HeadColor.GoZ";
         json["mitsuba"] = nlohmann::json::object();
         json["mitsuba"]["variant"] = "scalar_spectral";
         json["mitsuba"]["sensor"] = nlohmann::json::object();
         json["mitsuba"]["sensor"]["aperture_radius"] = 0.1;
         json["mitsuba"]["sensor"]["focus_distance"] = 0.0;
-        // json["mitsuba"]["sensor"]["focal_length"] = "200mm";
         json["mitsuba"]["sensor"]["fov"] = 15.0;
-        // json["mitsuba"]["sensor"]["fov_axis"] = "x";
         json["mitsuba"]["sensor"]["near_clip"] = 0.01;
         json["mitsuba"]["sensor"]["far_clip"] = 10000;
         json["mitsuba"]["sensor"]["sampler"] = nlohmann::json::object();
         json["mitsuba"]["sensor"]["sampler"]["type"] = "multijitter";
-        json["mitsuba"]["sensor"]["sampler"]["sample_count"] = 128;
+        json["mitsuba"]["sensor"]["sampler"]["sample_count"] = 64;
         json["mitsuba"]["sensor"]["film"] = nlohmann::json::object();
         json["mitsuba"]["sensor"]["film"]["width"] = 640;
-        json["mitsuba"]["sensor"]["film"]["height"] = 320;
+        json["mitsuba"]["sensor"]["film"]["height"] = 360;
         json["mitsuba"]["sensor"]["film"]["rfilter"] = "lanczos";
         json["mitsuba"]["sensor"]["marginSize"] = 0.05;
         json["mitsuba"]["sensor"]["viewDir"]["x"] = 0.0;
