@@ -61,9 +61,9 @@
     [If,[ZBrushInfo,16]==64,//64 bit
         [If,isMac,
             //use the path below for testing only
-            [VarSet,rootPath,"mitsuba2_shooter_2021/"]
+            // [VarSet,rootPath,"mitsuba2_shooter_2021/"]
             //use the path below for installed plugins
-            // [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
+            [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
             [VarSet, rootPath, [FileNameResolvePath, #rootPath]]
 
             [VarSet,dllPath,[StrMerge, #rootPath,"ZFileUtils.lib"]]
@@ -72,9 +72,9 @@
             [VarSet,separator,"/"]
         ,
             //use the path below for testing only
-            [VarSet,rootPath,"mitsuba2_shooter_2021/"]
+            // [VarSet,rootPath,"mitsuba2_shooter_2021/"]
             //use the path below for installed plugins
-            // [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
+            [VarSet,rootPath,"ZBRUSH_ZSTARTUP/ZPlugs64/mitsuba2_shooter_2021/"]
             [VarSet, rootPath, [FileNameResolvePath, #rootPath]]
             [Loop, [StrLength, rootPath],
                 [VarSet, tmpValue, [StrFind, "\", rootPath]]
@@ -146,42 +146,42 @@
 [ISubPalette, ZPlugin:Mitsuba2 Shooter]
 // slider for... 
 [ISlider, ZPlugin:Mitsuba2 Shooter:Aperture radius, 0.1, 0.1, 0.0, 10.0,
-    "Aperture radius", , 0, 1]
+    "Aperture radius", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Focus distance, 0.0, 0.01, -1.0, 1.0,
-    "Focus distance\n-1.0: closest point on the bounding sphere\n 1.0: fathest point on the bounding sphere", , 0, 1]
+    "Focus distance\n-1.0: closest point on the bounding sphere\n 1.0: fathest point on the bounding sphere", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:FOV, 15.0, 0.01, 0.01, 179.99,
     "Field of view (in degree)", , 0, 1]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Near clip, 0.01, 0.01, 0.01, 10000.0,
-    "Near clip", , 0, 1]
+    "Near clip", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Far clip, 10000.0, 0.01, 0.01, 10000.0,
-    "Far clip", , 0, 1]
+    "Far clip", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Margin size, 0.05, 0.01, 0.0, 1.0,
     "Margin size on the rim of the rendered image", , 0, 1]
-[ISlider, ZPlugin:Mitsuba2 Shooter:Sample count, 64, 1, 1, 1024,
+[ISlider, ZPlugin:Mitsuba2 Shooter:Sample count, 32, 1, 1, 512,
     "Sample count for path tracing", , 0, 1]
-[ISlider, ZPlugin:Mitsuba2 Shooter:Width, 1280, 1, 1, 3840,
-    "Width of the rendered image", , 0, 1]
-[ISlider, ZPlugin:Mitsuba2 Shooter:Height, 720, 1, 1, 2160,
-    "Height of the rendered image", , 0, 1]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Width, 640, 1, 1, 3840,
+    "Width of the rendered image", , 0, 0.5]
+[ISlider, ZPlugin:Mitsuba2 Shooter:Height, 360, 1, 1, 2160,
+    "Height of the rendered image", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Constant, 0.5, 0.0, 0.01, 10.0,
-    "Radiance for constant emitter", , 0, 1]
+    "Radiance for constant emitter", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Area, 100.0, 0.0, 0.01, 1000.0,
-    "Radiance for area emitter", , 0, 1]
+    "Radiance for area emitter", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:R, 51.0, 0.1, 0.0, 255.0,
-    "R value for background", , 0, 1]
+    "R value for background", , 0, 0.33]
 [ISlider, ZPlugin:Mitsuba2 Shooter:G, 51.0, 0.1, 0.0, 255.0,
-    "G value for background", , 0, 1]
+    "G value for background", , 0, 0.33]
 [ISlider, ZPlugin:Mitsuba2 Shooter:B, 51.0, 0.1, 0.0, 255.0,
-    "B value for background", , 0, 1]
+    "B value for background", , 0, 0.33]
 [ISwitch, ZPlugin:Mitsuba2 Shooter:PNG, 1, "Export PNG image", , , 0, 0.25]
-[ISwitch, ZPlugin:Mitsuba2 Shooter:JPEG, 0, "Export JPEG image", , , 0, 0.25]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:JPEG, 1, "Export JPEG image", , , 0, 0.25]
 [ISwitch, ZPlugin:Mitsuba2 Shooter:GMP, 0, "Export BMP image", , , 0, 0.25]
 [ISwitch, ZPlugin:Mitsuba2 Shooter:TGA, 0, "Export TGA image", , , 0, 0.25]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Scale, 1.0, 0.01, 0.01, 10.0,
-    "Scale for tone mapping", , 0, 1]
+    "Scale for tone mapping", , 0, 0.5]
 [ISlider, ZPlugin:Mitsuba2 Shooter:Gamma, 2.2, 0.01, 0.01, 10.0,
-    "Gamma for tone mapping", , 0, 1]
-[ISwitch, ZPlugin:Mitsuba2 Shooter:Open directory, 0, "Open directory after shooting", , , 0, 1]
+    "Gamma for tone mapping", , 0, 0.5]
+[ISwitch, ZPlugin:Mitsuba2 Shooter:Open directory, 1, "Open directory after shooting", , , 0, 1]
 
 // button for shoot
 [IButton, ZPlugin:Mitsuba2 Shooter:Shoot, "Render with specified parameters", 

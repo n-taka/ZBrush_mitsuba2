@@ -17,6 +17,10 @@ void appendMitsubaTargetShape(xml_document<> &doc, xml_node<> *scene, const nloh
 	xmlAppendAttribute(doc, filename, "name", "filename");
 	xmlAppendAttribute(doc, filename, "value", "mesh.ply");
 	shape->append_node(filename);
+	xml_node<> *face_normals = doc.allocate_node(node_element, "boolean");
+	xmlAppendAttribute(doc, face_normals, "name", "face_normals");
+	xmlAppendAttribute(doc, face_normals, "value", "true");
+	shape->append_node(face_normals);
 	// shape/bsdf
 	xml_node<> *bsdf = doc.allocate_node(node_element, "bsdf");
 	xmlAppendAttribute(doc, bsdf, "type", "roughplastic");
